@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lana — agency performance</title>
+  <meta name="description" content="Lana is the performance command center for insurance agencies: leaderboards, submissions, dialer activity, and AI call scoring.">
+  <meta name="theme-color" content="#4a3aa7">
+  <link rel="stylesheet" href="./css/app.css">
+  <!-- Solid tile so the mark holds up against light or dark browser chrome. -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234a3aa7'/><path d='M11 8v13h6l4-5' fill='none' stroke='%23fff' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+</head>
+<body>
+  <!-- Setup gate: shown when config.js still holds placeholders. -->
+  <div id="setup" class="setup" hidden>
+    <div class="setup__card">
+      <h1>Finish setting up Lana</h1>
+      <p>Open <code>public/js/config.js</code> and fill in your Supabase project URL and anon key, then reload.</p>
+      <p class="muted">Find both under <strong>Project Settings → API</strong> in the Supabase dashboard.</p>
+      <pre id="setup-diag" class="diag">no diagnostics — this page is running cached code</pre>
+    </div>
+  </div>
+
+  <!-- Auth -->
+  <div id="auth" class="auth" hidden>
+    <form class="auth__card" id="auth-form">
+      <div class="lockup lockup--lg">
+        <!-- The arm turns up at the end: an L that also reads as a trend line. -->
+        <svg class="mark" viewBox="0 0 32 32" role="img" aria-label="Lana">
+          <rect width="32" height="32" rx="8" fill="currentColor"/>
+          <path d="M11 8v13h6l4-5" fill="none" stroke="var(--brand-ink)"
+                stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="lockup__word">Lana</span>
+      </div>
+      <p class="auth__tag">Agency performance command center</p>
+
+      <label class="field">
+        <span>Email</span>
+        <input type="email" id="auth-email" autocomplete="email" required>
+      </label>
+
+      <label class="field">
+        <span>Password</span>
+        <input type="password" id="auth-password" autocomplete="current-password" minlength="8" required>
+      </label>
+
+      <label class="field" id="auth-name-field" hidden>
+        <span>Full name</span>
+        <input type="text" id="auth-name" autocomplete="name">
+      </label>
+
+      <button class="btn btn--primary btn--block" id="auth-submit" type="submit">Sign in</button>
+
+      <p class="auth__alt">
+        <span id="auth-alt-text">Need an account?</span>
+        <button type="button" class="linkbtn" id="auth-toggle">Create one</button>
+      </p>
+
+      <p class="auth__error" id="auth-error" role="alert" hidden></p>
+    </form>
+  </div>
+
+  <!-- App shell -->
+  <div id="shell" class="shell" hidden>
+    <aside class="sidebar">
+      <div class="lockup">
+        <svg class="mark" viewBox="0 0 32 32" role="img" aria-label="Lana">
+          <rect width="32" height="32" rx="8" fill="currentColor"/>
+          <path d="M11 8v13h6l4-5" fill="none" stroke="var(--brand-ink)"
+                stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="lockup__word">Lana</span>
+      </div>
+
+      <nav class="nav" id="nav" aria-label="Main"></nav>
+
+      <div class="sidebar__foot">
+        <button class="linkbtn" id="theme-toggle" type="button">Light mode</button>
+        <div class="whoami">
+          <div class="whoami__name" id="whoami-name"></div>
+          <div class="whoami__role" id="whoami-role"></div>
+        </div>
+        <button class="btn btn--ghost btn--block" id="signout" type="button">Sign out</button>
+      </div>
+    </aside>
+
+    <main class="main" id="main" tabindex="-1"></main>
+  </div>
+
+  <div class="toaster" id="toaster" aria-live="polite"></div>
+
+  <script type="module" src="./js/app.js?v=2"></script>
+</body>
+</html>

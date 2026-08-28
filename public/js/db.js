@@ -1,0 +1,748 @@
+// ---------------------------------------------------------------------------
+// Every read and write goes through here, so RLS behaviour is handled in one
+// place rather than at each call site.
+//
+// The trap this module exists to close: under row level security a blocked
+// read is not an error. Postgres filters the rows out and returns an empty
+// array with a 200. A dashboard that trusts that renders a confident zero —
+// the leaderboard looks empty, month AP reads $0, and nothing anywhere says
+// "you are not allowed to see this." So every query below runs behind
+// requireSession(), which throws when the session is gone instead of letting
+// an unauthenticated empty array reach the UI.
+// ---------------------------------------------------------------------------
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true },
+});
+
+export class NotSignedIn extends Error {
+  constructor() {
+    super('Your session expired. Sign in again.');
+    this.name = 'NotSignedIn';
+  }
+}
+
+async function requireSession() {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  if (!data.session) throw new NotSignedIn();
+  return data.session;
+}
+
+// Unwraps a PostgREST response, turning `{ error }` into a thrown Error.
+function unwrap({ data, error }) {
+  if (error) throw new Error(error.message || 'Request failed');
+  return data;
+}
+
+/* --- auth ---------------------------------------------------------------- */
+export const auth = {
+  signIn: (email, password) =>
+    supabase.auth.signInWithPassword({ email, password }).then(unwrap),
+
+  signUp: (email, password, fullName) =>
+    supabase.auth
+      .signUp({ email, password, options: { data: { full_name: fullName } } })
+      .then(unwrap),
+
+  signOut: () => supabase.auth.signOut(),
+
+  session: () => supabase.auth.getSession().then(r => r.data.session),
+
+  onChange: cb => supabase.auth.onAuthStateChange((_e, session) => cb(session)),
+};
+
+/* --- profile ------------------------------------------------------------- */
+export async function myProfile() {
+  const session = await requireSession();
+
+  const row = unwrap(
+    await supabase
+      .from('profiles')
+      .select('id, email, full_name, role, team_id, active, teams(name)')
+      .eq('id', session.user.id)
+      .maybeSingle()
+  );
+
+  // The signup trigger creates this row. A null here means the trigger did not
+  // fire — usually schema.sql was never run — which is worth saying plainly
+  // rather than rendering an app with no identity.
+  if (!row) {
+    throw new Error(
+      'No profile row for your account. Run supabase/schema.sql, then sign out and back in.'
+    );
+  }
+  if (!row.active) throw new Error('This account has been deactivated. Contact an admin.');
+
+  return row;
+}
+
+export async function updateMyName(fullName) {
+  const session = await requireSession();
+  return unwrap(
+    await supabase
+      .from('profiles')
+      .update({ full_name: fullName })
+      .eq('id', session.user.id)
+      .select()
+      .single()
+  );
+}
+
+/* --- reference data ------------------------------------------------------ */
+export async function listProducts() {
+  await requireSession();
+  return unwrap(
+    await supabase
+      .from('products')
+      .select('id, name, carrier, category, active')
+      .eq('active', true)
+      .order('category')
+      .order('carrier')
+  );
+}
+
+export async function listTeams() {
+  await requireSession();
+  return unwrap(await supabase.from('teams').select('id, name').order('name'));
+}
+
+export async function createTeam(name) {
+  await requireSession();
+  return unwrap(await supabase.from('teams').insert({ name }).select().single());
+}
+
+/* --- submissions --------------------------------------------------------- */
+const SUBMISSION_COLS =
+  'id, agent_id, category, client_name, policy_number, carrier, ap_amount, ' +
+  'status, submitted_on, notes, created_at, products(name), profiles!submissions_agent_id_fkey(full_name)';
+
+export async function createSubmission(input) {
+  const session = await requireSession();
+  return unwrap(
+    await supabase
+      .from('submissions')
+      .insert({
+        agent_id: session.user.id,
+        created_by: session.user.id,
+        product_id: input.product_id || null,
+        category: input.category,
+        client_name: input.client_name,
+        policy_number: input.policy_number || '',
+        carrier: input.carrier || '',
+        ap_amount: input.ap_amount,
+        submitted_on: input.submitted_on,
+        notes: input.notes || '',
+        status: 'pending',
+      })
+      .select()
+      .single()
+  );
+}
+
+export async function mySubmissions({ limit = 100 } = {}) {
+  const session = await requireSession();
+  return unwrap(
+    await supabase
+      .from('submissions')
+      .select(SUBMISSION_COLS)
+      .eq('agent_id', session.user.id)
+      .order('submitted_on', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(limit)
+  );
+}
+
+export async function allSubmissions({ start, end, status, agentId, limit = 300 } = {}) {
+  await requireSession();
+  let q = supabase
+    .from('submissions')
+    .select(SUBMISSION_COLS)
+    .order('submitted_on', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (start) q = q.gte('submitted_on', start);
+  if (end) q = q.lte('submitted_on', end);
+  if (status) q = q.eq('status', status);
+  if (agentId) q = q.eq('agent_id', agentId);
+
+  return unwrap(await q);
+}
+
+export async function setSubmissionStatus(id, status) {
+  const session = await requireSession();
+  return unwrap(
+    await supabase
+      .from('submissions')
+      .update({ status, decided_at: new Date().toISOString(), decided_by: session.user.id })
+      .eq('id', id)
+      .select()
+      .single()
+  );
+}
+
+export async function deleteSubmission(id) {
+  await requireSession();
+  const { error } = await supabase.from('submissions').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+/* --- agents (admin) ------------------------------------------------------ */
+export async function listAgents() {
+  await requireSession();
+  return unwrap(
+    await supabase
+      .from('profiles')
+      .select('id, email, full_name, role, team_id, active, created_at, teams(name)')
+      .order('full_name')
+  );
+}
+
+export async function updateAgent(id, patch) {
+  await requireSession();
+  return unwrap(
+    await supabase.from('profiles').update(patch).eq('id', id).select().single()
+  );
+}
+
+export async function setGoal(agentId, period, targetAp) {
+  await requireSession();
+  return unwrap(
+    await supabase
+      .from('goals')
+      .upsert({ agent_id: agentId, period, target_ap: targetAp }, { onConflict: 'agent_id,period' })
+      .select()
+      .single()
+  );
+}
+
+/* --- aggregates (RPC) ---------------------------------------------------- */
+export async function leaderboard(start, end, category = null) {
+  await requireSession();
+  return unwrap(
+    await supabase.rpc('leaderboard', { p_start: start, p_end: end, p_category: category })
+  );
+}
+
+export async function myMetrics() {
+  await requireSession();
+  const rows = unwrap(await supabase.rpc('my_metrics'));
+  return (
+    rows?.[0] ?? {
+      daily_ap: 0, month_ap: 0, pace: 0, target_ap: 0,
+      days_elapsed: 0, days_in_month: 0, month_count: 0, pending_count: 0,
+    }
+  );
+}
+
+export async function adminReport(start, end) {
+  await requireSession();
+  return unwrap(await supabase.rpc('admin_report', { p_start: start, p_end: end }));
+}
+
+/* --- dialer: daily activity ---------------------------------------------- */
+export async function mySession(loggedOn) {
+  const session = await requireSession();
+  return unwrap(
+    await supabase
+      .from('call_sessions')
+      .select('*')
+      .eq('dialer_id', session.user.id)
+      .eq('logged_on', loggedOn)
+      .maybeSingle()
+  );
+}
+
+// One row per dialer per day, so logging twice corrects the day rather than
+// double-counting it. The unique index backs the upsert.
+export async function saveSession(loggedOn, tally) {
+  const session = await requireSession();
+  return unwrap(
+    await supabase
+      .from('call_sessions')
+      .upsert(
+        {
+          dialer_id: session.user.id,
+          logged_on: loggedOn,
+          dials: tally.dials,
+          contacts: tally.contacts,
+          voicemails: tally.voicemails,
+          talk_minutes: tally.talk_minutes,
+          notes: tally.notes || '',
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'dialer_id,logged_on' }
+      )
+      .select()
+      .single()
+  );
+}
+
+export async function mySessions({ start, end, limit = 62 } = {}) {
+  const session = await requireSession();
+  let q = supabase
+    .from('call_sessions')
+    .select('*')
+    .eq('dialer_id', session.user.id)
+    .order('logged_on', { ascending: false })
+    .limit(limit);
+
+  if (start) q = q.gte('logged_on', start);
+  if (end) q = q.lte('logged_on', end);
+  return unwrap(await q);
+}
+
+export async function allSessions({ start, end, dialerId, limit = 400 } = {}) {
+  await requireSession();
+  let q = supabase
+    .from('call_sessions')
+    .select('*, profiles!call_sessions_dialer_id_fkey(full_name)')
+    .order('logged_on', { ascending: false })
+    .limit(limit);
+
+  if (start) q = q.gte('logged_on', start);
+  if (end) q = q.lte('logged_on', end);
+  if (dialerId) q = q.eq('dialer_id', dialerId);
+  return unwrap(await q);
+}
+
+/* --- dialer: appointments ------------------------------------------------ */
+const APPT_COLS =
+  'id, dialer_id, agent_id, lead_name, phone, set_on, scheduled_at, status, notes, created_at, ' +
+  'agent:profiles!appointments_agent_id_fkey(full_name), ' +
+  'dialer:profiles!appointments_dialer_id_fkey(full_name)';
+
+export async function bookableAgents() {
+  await requireSession();
+  return unwrap(await supabase.rpc('bookable_agents'));
+}
+
+export async function createAppointment(input) {
+  const session = await requireSession();
+  return unwrap(
+    await supabase
+      .from('appointments')
+      .insert({
+        dialer_id: session.user.id,
+        created_by: session.user.id,
+        agent_id: input.agent_id || null,
+        lead_name: input.lead_name,
+        phone: input.phone || '',
+        set_on: input.set_on,
+        scheduled_at: input.scheduled_at,
+        notes: input.notes || '',
+        status: 'scheduled',
+      })
+      .select()
+      .single()
+  );
+}
+
+export async function myAppointments({ limit = 200 } = {}) {
+  const session = await requireSession();
+  return unwrap(
+    await supabase
+      .from('appointments')
+      .select(APPT_COLS)
+      .eq('dialer_id', session.user.id)
+      .order('scheduled_at', { ascending: false })
+      .limit(limit)
+  );
+}
+
+// Appointments booked FOR the signed-in agent. Distinct from myAppointments,
+// which is the dialer's own book.
+export async function appointmentsForMe({ limit = 100 } = {}) {
+  const session = await requireSession();
+  return unwrap(
+    await supabase
+      .from('appointments')
+      .select(APPT_COLS)
+      .eq('agent_id', session.user.id)
+      .order('scheduled_at', { ascending: false })
+      .limit(limit)
+  );
+}
+
+export async function allAppointments({ start, end, status, dialerId, limit = 300 } = {}) {
+  await requireSession();
+  let q = supabase
+    .from('appointments')
+    .select(APPT_COLS)
+    .order('scheduled_at', { ascending: false })
+    .limit(limit);
+
+  if (start) q = q.gte('set_on', start);
+  if (end) q = q.lte('set_on', end);
+  if (status) q = q.eq('status', status);
+  if (dialerId) q = q.eq('dialer_id', dialerId);
+  return unwrap(await q);
+}
+
+export async function setAppointmentStatus(id, status) {
+  await requireSession();
+  return unwrap(
+    await supabase.from('appointments').update({ status }).eq('id', id).select().single()
+  );
+}
+
+export async function deleteAppointment(id) {
+  await requireSession();
+  const { error } = await supabase.from('appointments').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+export async function setDialerGoal(dialerId, period, targetDials, targetAppointments) {
+  await requireSession();
+  return unwrap(
+    await supabase
+      .from('dialer_goals')
+      .upsert(
+        {
+          dialer_id: dialerId,
+          period,
+          target_dials: targetDials,
+          target_appointments: targetAppointments,
+        },
+        { onConflict: 'dialer_id,period' }
+      )
+      .select()
+      .single()
+  );
+}
+
+/* --- dialer aggregates (RPC) --------------------------------------------- */
+export async function myDialerMetrics() {
+  await requireSession();
+  const rows = unwrap(await supabase.rpc('my_dialer_metrics'));
+  return (
+    rows?.[0] ?? {
+      dials_today: 0, contacts_today: 0, appts_today: 0,
+      dials_month: 0, contacts_month: 0, appts_month: 0,
+      held_month: 0, sold_month: 0, resolved_month: 0,
+      contact_rate: null, set_rate: null, held_rate: null, close_rate: null,
+      target_dials: 0, target_appointments: 0,
+      days_elapsed: 0, days_in_month: 0, appt_pace: 0,
+    }
+  );
+}
+
+export async function dialerLeaderboard(start, end) {
+  await requireSession();
+  return unwrap(
+    await supabase.rpc('dialer_leaderboard', { p_start: start, p_end: end })
+  );
+}
+
+/* --- call scoring -------------------------------------------------------- */
+const RECORDING_COLS =
+  'id, agent_id, uploaded_by, title, call_on, duration_seconds, storage_path, ' +
+  'transcript_source, status, error_message, created_at, ' +
+  'agent:profiles!call_recordings_agent_id_fkey(full_name)';
+
+// Deliberately omits `transcript`. A list of 50 calls would otherwise pull
+// 50 full transcripts over the wire to render 50 table rows.
+export async function listRecordings({ agentId, status, limit = 100 } = {}) {
+  await requireSession();
+  let q = supabase
+    .from('call_recordings')
+    .select(RECORDING_COLS)
+    .order('call_on', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (agentId) q = q.eq('agent_id', agentId);
+  if (status) q = q.eq('status', status);
+  return unwrap(await q);
+}
+
+export async function getRecording(id) {
+  await requireSession();
+  return unwrap(
+    await supabase
+      .from('call_recordings')
+      .select(`${RECORDING_COLS}, transcript`)
+      .eq('id', id)
+      .maybeSingle()
+  );
+}
+
+export async function createRecording(input) {
+  const session = await requireSession();
+  const hasTranscript = Boolean(input.transcript?.trim());
+  return unwrap(
+    await supabase
+      .from('call_recordings')
+      .insert({
+        agent_id: input.agent_id,
+        uploaded_by: session.user.id,
+        appointment_id: input.appointment_id || null,
+        title: input.title || '',
+        call_on: input.call_on,
+        duration_seconds: input.duration_seconds ?? null,
+        storage_path: input.storage_path ?? null,
+        transcript: hasTranscript ? input.transcript.trim() : null,
+        transcript_source: hasTranscript ? 'manual' : null,
+        status: hasTranscript ? 'transcribed' : 'uploaded',
+      })
+      .select()
+      .single()
+  );
+}
+
+export async function saveTranscript(id, transcript) {
+  await requireSession();
+  return unwrap(
+    await supabase
+      .from('call_recordings')
+      .update({
+        transcript: transcript.trim(),
+        transcript_source: 'manual',
+        status: 'transcribed',
+        error_message: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select()
+      .single()
+  );
+}
+
+export async function deleteRecording(id) {
+  await requireSession();
+  const { error } = await supabase.from('call_recordings').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+// The bucket's storage policy keys ownership off the first path segment, so
+// the uploader's own UUID has to lead the object name.
+export async function uploadAudio(file) {
+  const session = await requireSession();
+  const ext = (file.name.split('.').pop() || 'mp3').toLowerCase().slice(0, 8);
+  const path = `${session.user.id}/${crypto.randomUUID()}.${ext}`;
+
+  const { error } = await supabase.storage
+    .from('call-recordings')
+    .upload(path, file, { contentType: file.type || undefined, upsert: false });
+
+  if (error) throw new Error(error.message);
+  return path;
+}
+
+export async function audioUrl(storagePath) {
+  await requireSession();
+  const { data, error } = await supabase.storage
+    .from('call-recordings')
+    .createSignedUrl(storagePath, 3600);
+  if (error) throw new Error(error.message);
+  return data.signedUrl;
+}
+
+export async function scoreForRecording(recordingId) {
+  await requireSession();
+  return unwrap(
+    await supabase
+      .from('call_scores')
+      .select('*')
+      .eq('recording_id', recordingId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+  );
+}
+
+export async function myScores({ limit = 50 } = {}) {
+  const session = await requireSession();
+  return unwrap(
+    await supabase
+      .from('call_scores')
+      .select('*, call_recordings(title, call_on)')
+      .eq('agent_id', session.user.id)
+      .order('created_at', { ascending: false })
+      .limit(limit)
+  );
+}
+
+/* --- Edge Functions ------------------------------------------------------ */
+// The model call lives server-side because the Anthropic key cannot ship with
+// the frontend. invoke() attaches the caller's JWT, which is what the function
+// uses to decide whether this user may score this call.
+async function invokeFunction(name, body) {
+  await requireSession();
+  const { data, error } = await supabase.functions.invoke(name, { body });
+
+  if (error) {
+    // FunctionsHttpError carries the real reason in the response body; the
+    // error object alone just says "non-2xx status", which is useless to a user.
+    let detail = error.message;
+    try {
+      const payload = await error.context?.json?.();
+      if (payload?.error) detail = payload.error;
+    } catch {
+      /* body wasn't JSON — keep the generic message */
+    }
+    throw new Error(detail);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+export const scoreCall = recordingId => invokeFunction('score-call', { recording_id: recordingId });
+export const transcribeCall = recordingId => invokeFunction('transcribe-call', { recording_id: recordingId });
+
+/* --- scoring aggregates (RPC) -------------------------------------------- */
+export async function scoringLeaderboard(start, end) {
+  await requireSession();
+  return unwrap(await supabase.rpc('scoring_leaderboard', { p_start: start, p_end: end }));
+}
+
+/* --- human grading / calibration ----------------------------------------- */
+
+// One review per person per score. Re-grading updates your own row rather than
+// stacking a second opinion from the same head — but two managers can each
+// leave one, and their disagreement is itself signal.
+export async function myReview(scoreId) {
+  const session = await requireSession();
+  return unwrap(
+    await supabase
+      .from('score_reviews')
+      .select('*')
+      .eq('score_id', scoreId)
+      .eq('reviewer_id', session.user.id)
+      .maybeSingle()
+  );
+}
+
+export async function reviewsForScore(scoreId) {
+  await requireSession();
+  return unwrap(
+    await supabase
+      .from('score_reviews')
+      .select('*, profiles:reviewer_id(full_name)')
+      .eq('score_id', scoreId)
+      .order('created_at', { ascending: false })
+  );
+}
+
+export async function saveReview(input) {
+  const session = await requireSession();
+  return unwrap(
+    await supabase
+      .from('score_reviews')
+      .upsert(
+        {
+          score_id: input.score_id,
+          recording_id: input.recording_id,
+          reviewer_id: session.user.id,
+          overall_score: input.overall_score,
+          dimensions: input.dimensions,
+          compliance_agree: input.compliance_agree,
+          notes: input.notes || '',
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'score_id,reviewer_id' }
+      )
+      .select()
+      .single()
+  );
+}
+
+export async function calibrationByDimension(start, end) {
+  await requireSession();
+  return unwrap(
+    await supabase.rpc('calibration_by_dimension', { p_start: start, p_end: end })
+  );
+}
+
+export async function calibrationSummary(start, end) {
+  await requireSession();
+  const rows = unwrap(await supabase.rpc('calibration_summary', { p_start: start, p_end: end }));
+  return (
+    rows?.[0] ?? {
+      reviews: 0, model_avg: null, human_avg: null, delta: null,
+      mean_abs_gap: null, within_5: 0, within_10: 0, compliance_disputed: 0,
+    }
+  );
+}
+
+/* --- scoring rubric ------------------------------------------------------ */
+const RUBRIC_COLS =
+  'id, version, is_active, intro, scale, scale_note, dimensions, compliance_intro, ' +
+  'finding_codes, severity_guidance, evidence_rules, output_guidance, notes, created_at';
+
+export async function activeRubric() {
+  await requireSession();
+  return unwrap(
+    await supabase
+      .from('scoring_rubrics')
+      .select(RUBRIC_COLS)
+      .eq('is_active', true)
+      .maybeSingle()
+  );
+}
+
+export async function listRubrics({ limit = 50 } = {}) {
+  await requireSession();
+  return unwrap(
+    await supabase
+      .from('scoring_rubrics')
+      .select(`${RUBRIC_COLS}, profiles:created_by(full_name)`)
+      .order('created_at', { ascending: false })
+      .limit(limit)
+  );
+}
+
+export async function getRubric(id) {
+  await requireSession();
+  return unwrap(
+    await supabase.from('scoring_rubrics').select(RUBRIC_COLS).eq('id', id).maybeSingle()
+  );
+}
+
+// Publishing is two steps on purpose: insert the new version, then flip the
+// active flag through the RPC. The flag move is atomic in Postgres — doing it
+// from here in two updates would briefly leave two rows active, which the
+// partial unique index rejects.
+export async function createRubricVersion(input) {
+  const session = await requireSession();
+  return unwrap(
+    await supabase
+      .from('scoring_rubrics')
+      .insert({
+        version: input.version,
+        is_active: false,
+        intro: input.intro,
+        scale: input.scale,
+        scale_note: input.scale_note,
+        dimensions: input.dimensions,
+        compliance_intro: input.compliance_intro,
+        finding_codes: input.finding_codes,
+        severity_guidance: input.severity_guidance,
+        evidence_rules: input.evidence_rules,
+        output_guidance: input.output_guidance,
+        notes: input.notes || '',
+        created_by: session.user.id,
+      })
+      .select()
+      .single()
+  );
+}
+
+export async function publishRubric(id) {
+  await requireSession();
+  return unwrap(await supabase.rpc('publish_rubric', { p_rubric_id: id }));
+}
+
+export async function scoringSpend(start, end) {
+  await requireSession();
+  const rows = unwrap(await supabase.rpc('scoring_spend', { p_start: start, p_end: end }));
+  return (
+    rows?.[0] ?? {
+      calls_scored: 0, total_cost_usd: 0, avg_cost_usd: 0,
+      input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
+    }
+  );
+}

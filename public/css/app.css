@@ -1,0 +1,616 @@
+/* ===========================================================================
+   Lana — styles
+   Dark is the default theme; light is a selected counterpart, not a flip.
+   Chart colors come from the validated palette (see README § Palette).
+
+   Brand vs data: --brand is chrome only (mark, primary buttons, active nav,
+   focus rings). It never appears inside a chart, and it is deliberately
+   stepped OUTSIDE the series lightness band so it can't be mistaken for a
+   data mark. See README § Brand.
+   =========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  --brand:     #a89ff0;  /* OKLab L 0.741 — above the dark series band (0.622) */
+  --brand-ink: #0b0b0b;  /* label color ON brand; 8.3:1 */
+
+  --plane:        #0d0d0d;
+  --surface-1:    #1a1a19;
+  --surface-2:    #222221;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted:   #898781;
+  --grid:         #2c2c2a;
+  --baseline:     #383835;
+  --border:       rgba(255, 255, 255, 0.10);
+
+  --series-1: #3987e5;  /* MAPD */
+  --series-2: #d95926;  /* Ancillary */
+  --series-3: #199e70;  /* Combined */
+
+  /* Ordinal ramp for the dialer funnel — one hue, darker down the stages.
+     Bounded at 300/600: lighter than 250 fails contrast on the light surface,
+     darker than 600 fails it on the dark one. */
+  --seq-300: #6da7ec;
+  --seq-400: #3987e5;
+  --seq-500: #256abf;
+  --seq-600: #184f95;
+
+  /* Diverging pair for signed quantities (model-vs-human gap). Two hues that
+     read as opposites, with a neutral midpoint — never a single hue, which
+     would make +8 and -8 look like the same thing. */
+  --diverge-cool: #3987e5;
+  --diverge-warm: #e66767;
+  --diverge-mid:  #383835;
+
+  --good:     #0ca30c;
+  --warning:  #fab219;
+  --serious:  #ec835a;
+  --critical: #d03b3b;
+
+  --radius: 10px;
+  --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --brand:     #4a3aa7;  /* OKLab L 0.433 — below the light series band (0.575) */
+  --brand-ink: #ffffff;  /* 8.6:1 */
+
+  --plane:        #f9f9f7;
+  --surface-1:    #fcfcfb;
+  --surface-2:    #f2f1ed;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted:   #898781;
+  --grid:         #e1e0d9;
+  --baseline:     #c3c2b7;
+  --border:       rgba(11, 11, 11, 0.10);
+
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+
+  --seq-400: #3987e5;
+  --seq-500: #256abf;
+  --seq-600: #184f95;
+
+  --diverge-cool: #2a78d6;
+  --diverge-warm: #e34948;
+  --diverge-mid:  #f0efec;
+}
+
+* { box-sizing: border-box; }
+
+/* The `hidden` attribute hides an element only via the UA stylesheet's
+   `[hidden] { display: none }` — which sits at the same specificity as any
+   author class and loses on source order. `.setup`, `.auth`, and `.shell` all
+   set `display: grid`, so without this rule every screen renders at once,
+   stacked, and the first one in the DOM appears to be the whole app.
+   Any author `display` declaration on a toggleable element needs this. */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  font-family: var(--sans);
+  background: var(--plane);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; }
+h1 { font-size: 22px; }
+h2 { font-size: 16px; }
+h3 { font-size: 13px; }
+
+code {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.muted { color: var(--text-muted); }
+.tnum  { font-variant-numeric: tabular-nums; }
+
+/* --- Buttons & fields ---------------------------------------------------- */
+.btn {
+  font: inherit;
+  font-weight: 500;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: filter .12s ease, background .12s ease;
+}
+.btn:hover:not(:disabled) { filter: brightness(1.15); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn--primary { background: var(--brand); border-color: transparent; color: var(--brand-ink); }
+.btn--ghost   { background: transparent; }
+.btn--block   { width: 100%; }
+.btn--sm      { padding: 4px 10px; font-size: 12px; }
+
+.linkbtn {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--brand);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.field { display: block; margin-bottom: 14px; }
+.field > span {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 5px;
+}
+.field input, .field select, .field textarea {
+  font: inherit;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+.field input:focus, .field select:focus, .field textarea:focus {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+.field textarea { resize: vertical; min-height: 60px; }
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+@media (max-width: 620px) { .grid-2 { grid-template-columns: 1fr; } }
+
+/* --- Setup gate & auth --------------------------------------------------- */
+.setup, .auth {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.setup__card, .auth__card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+}
+.setup__card p { color: var(--text-secondary); }
+.diag {
+  margin: 18px 0 0;
+  padding: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-secondary);
+}
+.auth__tag {
+  text-align: center;
+  color: var(--text-muted);
+  margin: 4px 0 24px;
+  font-size: 13px;
+}
+.auth__alt { text-align: center; font-size: 13px; color: var(--text-secondary); margin: 14px 0 0; }
+.auth__error {
+  margin: 14px 0 0;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--critical) 15%, transparent);
+  border: 1px solid var(--critical);
+  font-size: 13px;
+}
+
+/* --- Shell --------------------------------------------------------------- */
+.shell { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+@media (max-width: 800px) { .shell { grid-template-columns: 1fr; } }
+
+.sidebar {
+  background: var(--surface-1);
+  border-right: 1px solid var(--border);
+  padding: 20px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+/* --- Brand lockup -------------------------------------------------------- */
+/* The <svg> inherits `color` for its tile fill, so one token drives the mark
+   in both themes and the stroke stays readable against it either way. */
+.lockup {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--brand);
+}
+.lockup .mark { width: 22px; height: 22px; flex: none; display: block; }
+.lockup__word {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--text-primary);
+}
+
+.lockup--lg { flex-direction: column; gap: 12px; margin-bottom: 4px; }
+.lockup--lg .mark { width: 40px; height: 40px; }
+.lockup--lg .lockup__word { font-size: 26px; }
+.sidebar__foot { margin-top: auto; display: flex; flex-direction: column; gap: 12px; }
+
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav__section {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  margin: 14px 0 4px 10px;
+}
+.nav a {
+  display: block;
+  padding: 7px 10px 7px 13px;
+  border-radius: 7px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  /* Transparent by default so the label doesn't shift when it activates. */
+  border-left: 3px solid transparent;
+}
+.nav a:hover { background: var(--surface-2); color: var(--text-primary); }
+.nav a.is-active {
+  background: var(--surface-2);
+  border-left-color: var(--brand);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.whoami { font-size: 12px; }
+.whoami__name { font-weight: 500; }
+.whoami__role { color: var(--text-muted); text-transform: capitalize; }
+
+.main { padding: 26px 30px 60px; max-width: 1120px; }
+@media (max-width: 800px) { .main { padding: 20px 16px 48px; } }
+
+.page__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.page__sub { color: var(--text-muted); font-size: 13px; margin-top: 3px; }
+
+/* --- Cards --------------------------------------------------------------- */
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  margin-bottom: 18px;
+}
+.card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+/* --- KPI stat tiles ------------------------------------------------------ */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.kpi {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+}
+.kpi__label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.kpi__value { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; }
+.kpi__note { font-size: 12px; color: var(--text-muted); margin-top: 5px; }
+
+/* Meter: one ratio against a limit. Track is a lighter step of the same hue. */
+.meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--grid);
+  overflow: hidden;
+  margin-top: 10px;
+}
+.meter__fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--seq-400);
+  transition: width .3s ease;
+}
+.meter__fill--good { background: var(--good); }
+
+/* --- Bar rows (leaderboard + report breakdowns) -------------------------- */
+.bars { display: flex; flex-direction: column; gap: 8px; }
+.bar {
+  display: grid;
+  grid-template-columns: 22px minmax(96px, 150px) 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+@media (max-width: 620px) {
+  .bar { grid-template-columns: 20px 1fr auto; }
+  .bar__track { grid-column: 1 / -1; }
+}
+.bar__rank {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.bar__label {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bar__sub { display: block; font-size: 11px; color: var(--text-muted); }
+.bar__track {
+  background: var(--grid);
+  border-radius: 4px;
+  height: 16px;
+  overflow: hidden;
+}
+/* 4px rounded data-end, anchored flat to the baseline at the left. */
+.bar__fill {
+  height: 100%;
+  border-radius: 0 4px 4px 0;
+  background: var(--seq-400);
+  min-width: 2px;
+  transition: width .3s ease;
+}
+/* Direct value label on every bar — this is the relief the light-mode
+   contrast WARN requires, so it is not optional decoration. */
+.bar__value {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  min-width: 74px;
+  text-align: right;
+}
+.bar.is-me .bar__label { font-weight: 700; }
+.bar.is-me .bar__fill  { background: var(--series-2); }
+
+/* --- Legend & status chips ----------------------------------------------- */
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 12px; }
+.legend__item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.legend__swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+
+/* Status always ships icon + label, never color alone. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.chip--good     { color: var(--good); }
+.chip--warning  { color: var(--warning); }
+.chip--serious  { color: var(--serious); }
+.chip--critical { color: var(--critical); }
+
+/* --- Tables -------------------------------------------------------------- */
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 0 10px 8px;
+  border-bottom: 1px solid var(--baseline);
+  white-space: nowrap;
+}
+td { padding: 9px 10px; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+.filters .field { margin-bottom: 0; min-width: 150px; }
+
+.empty {
+  padding: 30px 18px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.spinner { padding: 30px; text-align: center; color: var(--text-muted); font-size: 13px; }
+
+/* --- Diverging bars (signed gap around a centre line) -------------------- */
+.diverge { display: flex; flex-direction: column; gap: 10px; }
+.dv {
+  display: grid;
+  grid-template-columns: minmax(120px, 190px) 1fr 56px;
+  gap: 12px;
+  align-items: center;
+}
+.dv__label { font-size: 13px; }
+.dv__track {
+  position: relative;
+  height: 18px;
+  background: var(--grid);
+  border-radius: 4px;
+  overflow: hidden;
+}
+/* The zero line. Without it a diverging bar is unreadable — you can't tell
+   which side of nothing a fill sits on. */
+.dv__mid {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--diverge-mid);
+}
+.dv__fill { position: absolute; top: 0; bottom: 0; min-width: 2px; border-radius: 3px; }
+.dv__val {
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 620px) {
+  .dv { grid-template-columns: 1fr 56px; }
+  .dv__track { grid-column: 1 / -1; }
+}
+
+/* --- Rubric editor rows -------------------------------------------------- */
+.rrow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.rrow input, .rrow textarea, .rrow select {
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+}
+.rrow input:focus, .rrow textarea:focus {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+.rrow--stack { flex-direction: column; align-items: stretch; }
+.rrow__top { display: flex; gap: 8px; align-items: center; }
+.rrow--stack textarea { width: 100%; resize: vertical; }
+.rrow [data-remove] { flex: none; }
+
+@media (max-width: 620px) {
+  .rrow, .rrow__top { flex-direction: column; align-items: stretch; }
+  .rrow input { width: 100% !important; }
+}
+
+/* --- Transcript ---------------------------------------------------------- */
+/* Speakers are told apart by weight and a background tint, never by hue.
+   Colour in this app means data; a two-tone transcript that borrowed chart
+   colours would read as if the speakers were series in a chart. */
+.transcript {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  max-height: 620px;
+  overflow-y: auto;
+}
+.turn {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 110px) 1fr;
+  gap: 12px;
+  padding: 8px 14px;
+  font-size: 13px;
+  line-height: 1.65;
+  border-bottom: 1px solid var(--grid);
+}
+.turn:last-child { border-bottom: 0; }
+/* Alternate speaker gets a tint, so scanning who-said-what doesn't require
+   reading every label. */
+.turn--s1 { background: var(--surface-2); }
+.turn--plain { grid-template-columns: 40px 1fr; }
+.turn--plain .turn__who { display: none; }
+
+.turn__no {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding-top: 2px;
+  user-select: none;
+}
+.turn__who {
+  font-weight: 600;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.turn__text { white-space: pre-wrap; word-break: break-word; }
+
+@media (max-width: 620px) {
+  .turn, .turn--plain { grid-template-columns: 1fr; gap: 2px; }
+  .turn__no { display: none; }
+}
+
+.transcript-raw {
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 620px;
+  overflow-y: auto;
+}
+
+/* --- Toasts -------------------------------------------------------------- */
+.toaster {
+  position: fixed;
+  bottom: 18px;
+  right: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 50;
+}
+.toast {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--brand);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  max-width: 320px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .35);
+}
+.toast--error { border-left-color: var(--critical); }
+.toast--ok    { border-left-color: var(--good); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
