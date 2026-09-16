@@ -56,8 +56,66 @@
         <span id="auth-alt-text">Need an account?</span>
         <button type="button" class="linkbtn" id="auth-toggle">Create one</button>
       </p>
+      <p class="auth__alt">
+        <button type="button" class="linkbtn" id="auth-forgot-link">Forgot password?</button>
+      </p>
 
       <p class="auth__error" id="auth-error" role="alert" hidden></p>
+    </form>
+
+    <!-- Request a reset email. Supabase emails a recovery link back to this
+         same page (see db.js requestPasswordReset), which reopens here in
+         recovery mode — see the isPasswordRecovery check in app.js. -->
+    <form class="auth__card" id="forgot-form" hidden>
+      <div class="lockup lockup--lg">
+        <svg class="mark" viewBox="0 0 32 32" role="img" aria-label="Lana">
+          <rect width="32" height="32" rx="8" fill="currentColor"/>
+          <path d="M11 8v13h6l4-5" fill="none" stroke="var(--brand-ink)"
+                stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="lockup__word">Lana</span>
+      </div>
+      <p class="auth__tag">Enter your email and we'll send a link to reset your password.</p>
+
+      <label class="field">
+        <span>Email</span>
+        <input type="email" id="forgot-email" autocomplete="email" required>
+      </label>
+
+      <button class="btn btn--primary btn--block" id="forgot-submit" type="submit">Send reset link</button>
+
+      <p class="auth__alt">
+        <button type="button" class="linkbtn" id="forgot-back">Back to sign in</button>
+      </p>
+
+      <p class="auth__error" id="forgot-error" role="alert" hidden></p>
+    </form>
+
+    <!-- Shown in place of the sign-in form when the page is opened from a
+         Supabase recovery email link. -->
+    <form class="auth__card" id="recovery-form" hidden>
+      <div class="lockup lockup--lg">
+        <svg class="mark" viewBox="0 0 32 32" role="img" aria-label="Lana">
+          <rect width="32" height="32" rx="8" fill="currentColor"/>
+          <path d="M11 8v13h6l4-5" fill="none" stroke="var(--brand-ink)"
+                stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="lockup__word">Lana</span>
+      </div>
+      <p class="auth__tag">Choose a new password.</p>
+
+      <label class="field">
+        <span>New password</span>
+        <input type="password" id="recovery-password" autocomplete="new-password" minlength="8" required>
+      </label>
+      <label class="field">
+        <span>Confirm new password</span>
+        <input type="password" id="recovery-confirm" autocomplete="new-password" minlength="8" required>
+      </label>
+
+      <button class="btn btn--primary btn--block" id="recovery-submit" type="submit">Set new password</button>
+
+      <p class="auth__error" id="recovery-error" role="alert" hidden></p>
     </form>
   </div>
 
@@ -90,6 +148,6 @@
 
   <div class="toaster" id="toaster" aria-live="polite"></div>
 
-  <script type="module" src="./js/app.js?v=3"></script>
+  <script type="module" src="./js/app.js?v=4"></script>
 </body>
 </html>

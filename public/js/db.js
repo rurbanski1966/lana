@@ -52,6 +52,14 @@ export const auth = {
   updatePassword: password =>
     supabase.auth.updateUser({ password }).then(unwrap),
 
+  // redirectTo must be on Supabase's allow-list: Authentication → URL
+  // Configuration → Redirect URLs. Using the current origin means this works
+  // from both the deployed site and a local dev server without editing code.
+  requestPasswordReset: email =>
+    supabase.auth
+      .resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname })
+      .then(unwrap),
+
   session: () => supabase.auth.getSession().then(r => r.data.session),
 
   onChange: cb => supabase.auth.onAuthStateChange((_e, session) => cb(session)),

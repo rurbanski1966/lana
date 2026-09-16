@@ -6,9 +6,16 @@ import { toast, esc } from './ui.js';
 
 // Bump when debugging a stale-cache problem: if the browser doesn't show this
 // exact string, it is running old code and nothing else you observe is real.
-const BUILD = 'build-3';
+const BUILD = 'build-4';
 
 const el = id => document.getElementById(id);
+
+// Read before db.js creates the Supabase client and consumes these tokens
+// from the URL. A recovery-email link lands here as
+// "#access_token=...&type=recovery" (or "?code=...&type=recovery" for PKCE);
+// checking now, rather than reacting to the auth event later, means there is
+// no race against how quickly that event fires.
+let isPasswordRecovery = location.hash.includes('type=recovery') || location.search.includes('type=recovery');
 
 // The setup gate runs before db.js is imported at all. db.js constructs a
 // Supabase client at module scope, and a placeholder URL throws there — which
@@ -169,9 +176,19 @@ async function route() {
 /* --- auth screen --------------------------------------------------------- */
 let signUpMode = false;
 
+// The three auth cards (sign in/up, forgot-password, set-new-password) share
+// the #auth container and are toggled by id rather than laid out as routes —
+// none of them need a URL of their own.
+function showAuthCard(id) {
+  ['auth-form', 'forgot-form', 'recovery-form'].forEach(cardId => {
+    el(cardId).hidden = cardId !== id;
+  });
+}
+
 function showAuth() {
   el('shell').hidden = true;
   el('auth').hidden = false;
+  showAuthCard(isPasswordRecovery ? 'recovery-form' : 'auth-form');
   el('auth-error').hidden = true;
 }
 
@@ -180,6 +197,69 @@ function authError(msg) {
   box.textContent = msg;
   box.hidden = false;
 }
+
+el('auth-forgot-link').addEventListener('click', () => {
+  showAuthCard('forgot-form');
+  el('forgot-error').hidden = true;
+});
+
+el('forgot-back').addEventListener('click', () => showAuthCard('auth-form'));
+
+el('forgot-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = el('forgot-submit');
+  const email = el('forgot-email').value.trim();
+  const errBox = el('forgot-error');
+  errBox.hidden = true;
+
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  try {
+    await db.auth.requestPasswordReset(email);
+    toast('Check your email for a reset link.', 'ok');
+    el('forgot-form').reset();
+    showAuthCard('auth-form');
+  } catch (err) {
+    errBox.textContent = err.message || 'Could not send reset email.';
+    errBox.hidden = false;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send reset link';
+  }
+});
+
+el('recovery-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = el('recovery-submit');
+  const errBox = el('recovery-error');
+  errBox.hidden = true;
+  const next = el('recovery-password').value;
+  const confirm = el('recovery-confirm').value;
+
+  if (next !== confirm) {
+    errBox.textContent = 'Passwords do not match.';
+    errBox.hidden = false;
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Updating…';
+  try {
+    await db.auth.updatePassword(next);
+    isPasswordRecovery = false;
+    // Drop the recovery tokens from the address bar now that they're spent.
+    history.replaceState(null, '', location.pathname);
+    el('recovery-form').reset();
+    toast('Password updated.', 'ok');
+    await start();
+  } catch (err) {
+    errBox.textContent = err.message || 'Could not update password.';
+    errBox.hidden = false;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Set new password';
+  }
+});
 
 el('auth-toggle').addEventListener('click', () => {
   signUpMode = !signUpMode;
@@ -254,6 +334,11 @@ el('theme-toggle').addEventListener('click', () => {
 async function start() {
   const session = await db.auth.session();
   if (!session) return showAuth();
+
+  // A recovery link's session is only good for setting a new password — land
+  // there instead of straight into the dashboard, even though the session
+  // itself is technically valid enough to skip it.
+  if (isPasswordRecovery) return showAuth();
 
   try {
     ctx.profile = await db.myProfile();
