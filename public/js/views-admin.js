@@ -11,16 +11,31 @@ import {
 import { catLabel, SERIES } from './views-agent.js';
 
 /* === Agents =============================================================== */
-export async function agents(main) {
+// A temp password only has to clear Supabase's 8-char minimum and be easy to
+// read aloud/retype once — it's replaced the first time the person signs in
+// and changes it from Account.
+function randomTempPassword() {
+  const words = ['tide', 'maple', 'ridge', 'coral', 'delta', 'ember', 'grove', 'quartz', 'summit', 'willow'];
+  const word = words[Math.floor(Math.random() * words.length)];
+  const digits = String(Math.floor(1000 + Math.random() * 9000));
+  return `${word}-${digits}`;
+}
+
+export async function agents(main, ctx) {
   main.innerHTML = `
     <div class="page__head"><div>
       <h1>Agents</h1>
       <div class="page__sub">Roles, teams, and monthly AP targets</div>
     </div>
-    <button class="btn" id="new-team">New team</button></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn" id="new-team">New team</button>
+      <button class="btn btn--primary" id="new-agent-toggle">New account</button>
+    </div></div>
+    <div class="card" id="new-agent-card" hidden></div>
     <div class="card" id="roster">${spinner()}</div>`;
 
   const roster = document.getElementById('roster');
+  const newAgentCard = document.getElementById('new-agent-card');
 
   document.getElementById('new-team').addEventListener('click', async () => {
     const name = prompt('Team name');
@@ -33,6 +48,71 @@ export async function agents(main) {
       toast(err.message, 'error');
     }
   });
+
+  document.getElementById('new-agent-toggle').addEventListener('click', () => {
+    newAgentCard.hidden = !newAgentCard.hidden;
+    if (!newAgentCard.hidden) renderNewAgentForm();
+  });
+
+  function renderNewAgentForm() {
+    newAgentCard.innerHTML = `
+      <div class="card__head"><h2>New account</h2></div>
+      <form id="new-agent-form">
+        <div class="grid-2">
+          <label class="field">
+            <span>First name *</span>
+            <input type="text" id="na-first" required maxlength="80">
+          </label>
+          <label class="field">
+            <span>Last name *</span>
+            <input type="text" id="na-last" required maxlength="80">
+          </label>
+        </div>
+        <label class="field">
+          <span>Email *</span>
+          <input type="email" id="na-email" required>
+        </label>
+        <div class="grid-2">
+          ${selectField('na-role', 'Role *', ROLES, 'agent')}
+          <label class="field">
+            <span>Temporary password *</span>
+            <div style="display:flex;gap:8px">
+              <input type="text" id="na-password" required minlength="8" value="${esc(randomTempPassword())}">
+              <button class="btn" type="button" id="na-regen">New</button>
+            </div>
+          </label>
+        </div>
+        <p class="muted">Share this password with them directly — they can change it from Account after signing in.</p>
+        <button class="btn btn--primary" type="submit" id="na-submit">Create account</button>
+      </form>`;
+
+    newAgentCard.querySelector('#na-regen').addEventListener('click', () => {
+      newAgentCard.querySelector('#na-password').value = randomTempPassword();
+    });
+
+    newAgentCard.querySelector('#new-agent-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const btn = newAgentCard.querySelector('#na-submit');
+      const val = id => newAgentCard.querySelector('#' + id).value.trim();
+
+      btn.disabled = true;
+      btn.textContent = 'Creating…';
+      try {
+        await db.createAgent(
+          val('na-first'), val('na-last'), val('na-email'),
+          newAgentCard.querySelector('#na-password').value, val('na-role')
+        );
+        toast(`Account created for ${val('na-email')}.`, 'ok');
+        newAgentCard.hidden = true;
+        draw();
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Create account';
+      }
+    });
+  }
 
   async function draw() {
     roster.innerHTML = spinner();
@@ -53,7 +133,7 @@ export async function agents(main) {
       <div class="tablewrap"><table>
         <thead><tr>
           <th>Name</th><th>Email</th><th>Role</th><th>Team</th>
-          <th class="num">Month target</th><th>Active</th>
+          <th class="num">Month target</th><th>Active</th><th></th>
         </tr></thead>
         <tbody>${people.map(p => `
           <tr data-id="${esc(p.id)}">
@@ -75,6 +155,11 @@ export async function agents(main) {
             <td>
               <input type="checkbox" data-field="active"${p.active ? ' checked' : ''}>
             </td>
+            <td>
+              ${p.id === ctx.profile.id
+                ? ''
+                : `<button class="btn btn--ghost" data-action="remove" type="button">Remove</button>`}
+            </td>
           </tr>`).join('')}
         </tbody>
       </table></div>`;
@@ -91,6 +176,23 @@ export async function agents(main) {
 
       tr.querySelector('[data-field="active"]').addEventListener('change', e =>
         save(id, { active: e.target.checked }, e.target.checked ? 'Account activated.' : 'Account deactivated.'));
+
+      const removeBtn = tr.querySelector('[data-action="remove"]');
+      removeBtn?.addEventListener('click', async () => {
+        const name = tr.querySelector('td').textContent;
+        if (!confirm(`Remove ${name}? This deletes their login and cannot be undone.`)) return;
+        removeBtn.disabled = true;
+        removeBtn.textContent = 'Removing…';
+        try {
+          await db.deleteAgent(id);
+          toast('Account removed.', 'ok');
+          draw();
+        } catch (err) {
+          toast(err.message, 'error');
+          removeBtn.disabled = false;
+          removeBtn.textContent = 'Remove';
+        }
+      });
 
       const target = tr.querySelector('[data-field="target"]');
       target.addEventListener('change', async () => {

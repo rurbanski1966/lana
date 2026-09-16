@@ -604,6 +604,22 @@ async function invokeFunction(name, body) {
 export const scoreCall = recordingId => invokeFunction('score-call', { recording_id: recordingId });
 export const transcribeCall = recordingId => invokeFunction('transcribe-call', { recording_id: recordingId });
 
+// Creating a user with an admin-chosen password, and deleting one, both need
+// the Auth Admin API — the anon key this file holds can't do either, so both
+// go through the admin-users Edge Function instead of a table write.
+export const createAgent = (firstName, lastName, email, password, role) =>
+  invokeFunction('admin-users', {
+    action: 'create',
+    first_name: firstName,
+    last_name: lastName,
+    email,
+    password,
+    role,
+  });
+
+export const deleteAgent = userId =>
+  invokeFunction('admin-users', { action: 'delete', user_id: userId });
+
 /* --- scoring aggregates (RPC) -------------------------------------------- */
 export async function scoringLeaderboard(start, end) {
   await requireSession();
