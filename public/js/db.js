@@ -450,13 +450,13 @@ export async function dialerLeaderboard(start, end) {
 
 /* --- call scoring -------------------------------------------------------- */
 const RECORDING_COLS =
-  'id, agent_id, uploaded_by, title, call_on, duration_seconds, storage_path, ' +
+  'id, agent_id, agent_name, uploaded_by, title, call_on, duration_seconds, storage_path, ' +
   'transcript_source, status, error_message, created_at, ' +
   'agent:profiles!call_recordings_agent_id_fkey(full_name)';
 
 // Deliberately omits `transcript`. A list of 50 calls would otherwise pull
 // 50 full transcripts over the wire to render 50 table rows.
-export async function listRecordings({ agentId, status, limit = 100 } = {}) {
+export async function listRecordings({ agentId, agentName, status, limit = 100 } = {}) {
   await requireSession();
   let q = supabase
     .from('call_recordings')
@@ -466,8 +466,16 @@ export async function listRecordings({ agentId, status, limit = 100 } = {}) {
     .limit(limit);
 
   if (agentId) q = q.eq('agent_id', agentId);
+  if (agentName) q = q.eq('agent_name', agentName);
   if (status) q = q.eq('status', status);
   return unwrap(await q);
+}
+
+// Every free-text name ever typed for a label-only call, for the "remembered
+// names" dropdown on the upload form and the agent filter on the call list.
+export async function recordingAgentNames() {
+  await requireSession();
+  return (unwrap(await supabase.rpc('recording_agent_names')) ?? []).map(r => r.agent_name);
 }
 
 export async function getRecording(id) {
@@ -488,7 +496,8 @@ export async function createRecording(input) {
     await supabase
       .from('call_recordings')
       .insert({
-        agent_id: input.agent_id,
+        agent_id: input.agent_id || null,
+        agent_name: input.agent_id ? null : (input.agent_name?.trim() || null),
         uploaded_by: session.user.id,
         appointment_id: input.appointment_id || null,
         title: input.title || '',

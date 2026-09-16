@@ -112,6 +112,14 @@ export async function reviews(main, ctx) {
     <div class="card" id="list">${spinner()}</div>`;
 
   const people = isAdmin ? await db.listAgents() : [];
+  const rememberedNames = isAdmin ? await db.recordingAgentNames() : [];
+
+  // Typed against a datalist: matches an existing account's name (case-
+  // insensitive) and it's a real agent; anything else is saved as a label
+  // with no login, per Ryan 2026-09-16 — recordings/grades still need to be
+  // browsable by that name later, hence recordingAgentNames() below.
+  const activePeople = people.filter(p => p.active);
+  const nameToId = new Map(activePeople.map(p => [(p.full_name || p.email).trim().toLowerCase(), p.id]));
 
   /* --- new recording --- */
   const newCard = document.getElementById('new');
@@ -135,11 +143,16 @@ export async function reviews(main, ctx) {
       ${isAdmin ? `
         <label class="field">
           <span>Agent on the call *</span>
-          <select id="agent_id" required>
-            ${people.filter(p => p.active).map(p =>
-              `<option value="${esc(p.id)}"${p.id === ctx.profile.id ? ' selected' : ''}>${esc(p.full_name || p.email)}</option>`
-            ).join('')}
-          </select>
+          <input type="text" id="agent_input" list="agent-datalist" required
+                 placeholder="Start typing a name…"
+                 value="${esc(ctx.profile.full_name || '')}">
+          <datalist id="agent-datalist">
+            ${activePeople.map(p => `<option value="${esc(p.full_name || p.email)}">`).join('')}
+            ${rememberedNames.map(n => `<option value="${esc(n)}">`).join('')}
+          </datalist>
+          <span class="muted" style="font-size:12px">
+            Pick an existing account, or type a new name — it's saved as a label with no login and remembered here next time.
+          </span>
         </label>` : ''}
 
       <label class="field">
@@ -167,6 +180,15 @@ export async function reviews(main, ctx) {
       return toast('Add an audio file or a transcript.', 'error');
     }
 
+    let agentId = ctx.profile.id;
+    let agentName = null;
+    if (isAdmin) {
+      const typed = val('agent_input');
+      if (!typed) return toast('Enter or pick an agent.', 'error');
+      const matchedId = nameToId.get(typed.toLowerCase());
+      if (matchedId) { agentId = matchedId; } else { agentId = null; agentName = typed; }
+    }
+
     const btn = newCard.querySelector('#rec-save');
     btn.disabled = true;
     btn.textContent = file ? 'Uploading…' : 'Saving…';
@@ -174,7 +196,8 @@ export async function reviews(main, ctx) {
     try {
       const storagePath = file ? await db.uploadAudio(file) : null;
       await db.createRecording({
-        agent_id: isAdmin ? val('agent_id') : ctx.profile.id,
+        agent_id: agentId,
+        agent_name: agentName,
         title: val('title'),
         call_on: val('call_on'),
         storage_path: storagePath,
@@ -195,9 +218,31 @@ export async function reviews(main, ctx) {
   /* --- list --- */
   const list = document.getElementById('list');
 
+  // Every recording for one person, real account or label — the "folder" an
+  // admin opens to see everything scored for that name so far.
+  const filterOptions = isAdmin
+    ? [
+        { value: '', label: 'All calls' },
+        ...activePeople.map(p => ({ value: `id:${p.id}`, label: p.full_name || p.email })),
+        ...rememberedNames.map(n => ({ value: `name:${n}`, label: n })),
+      ]
+    : [];
+
+  if (isAdmin) {
+    document.querySelector('#list').insertAdjacentHTML('beforebegin', `
+      <div class="filters">${selectField('agent-filter', 'Agent', filterOptions, '')}</div>`);
+    document.getElementById('agent-filter').addEventListener('change', () => draw());
+  }
+
   async function draw() {
     list.innerHTML = spinner();
-    const rows = await db.listRecordings({ limit: 100 });
+    const filter = isAdmin ? document.getElementById('agent-filter').value : '';
+    const [kind, value] = filter.split(/:(.*)/s);
+    const rows = await db.listRecordings({
+      limit: filter ? 500 : 100,
+      agentId: kind === 'id' ? value : undefined,
+      agentName: kind === 'name' ? value : undefined,
+    });
 
     if (rows.length === 0) {
       list.innerHTML = empty('No calls yet.');
@@ -218,7 +263,7 @@ export async function reviews(main, ctx) {
             <td class="tnum">${esc(fmtDate(r.call_on))}</td>
             <td>${esc(r.title || 'Untitled call')}${r.error_message
               ? `<br><span class="muted">${esc(r.error_message.slice(0, 80))}</span>` : ''}</td>
-            <td>${esc(r.agent?.full_name || '—')}</td>
+            <td>${esc(r.agent?.full_name || r.agent_name || '—')}</td>
             <td class="tnum muted">${esc(fmtDuration(r.duration_seconds))}</td>
             <td>${statusChipFor(r.status)}</td>
             <td><a class="btn btn--ghost btn--sm" href="#/reviews/${esc(r.id)}">Open</a></td>
@@ -251,7 +296,7 @@ export async function reviewDetail(main, ctx, recordingId) {
         <div>
           <h1>${esc(rec.title || 'Untitled call')}</h1>
           <div class="page__sub">
-            ${esc(fmtDate(rec.call_on))} · ${esc(rec.agent?.full_name || '—')} · ${statusChipFor(rec.status)}
+            ${esc(fmtDate(rec.call_on))} · ${esc(rec.agent?.full_name || rec.agent_name || '—')} · ${statusChipFor(rec.status)}
           </div>
         </div>
         <a class="btn btn--ghost" href="#/reviews">Back</a>
