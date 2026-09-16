@@ -6,7 +6,7 @@ import { toast, esc } from './ui.js';
 
 // Bump when debugging a stale-cache problem: if the browser doesn't show this
 // exact string, it is running old code and nothing else you observe is real.
-const BUILD = 'build-2';
+const BUILD = 'build-3';
 
 const el = id => document.getElementById(id);
 
@@ -38,6 +38,7 @@ const adminViews = await import('./views-admin.js');
 const dialerViews = await import('./views-dialer.js');
 const scoringViews = await import('./views-scoring.js');
 const rubricViews = await import('./views-rubric.js');
+const accountViews = await import('./views-account.js');
 
 const ctx = { profile: null };
 
@@ -69,6 +70,10 @@ const ROUTES = {
   '#/admin/scorecard':      { title: 'Scorecard',   render: scoringViews.scorecard, roles: ['admin'] },
   '#/admin/calibration':    { title: 'Calibration', render: scoringViews.calibration, roles: ['admin'] },
   '#/admin/reports':        { title: 'Reports',     render: adminViews.reports,     roles: ['admin'] },
+
+  // Not in NAV — reached from the sidebar's whoami link, not the menu, since
+  // it applies equally to every role.
+  '#/account':              { title: 'Account',     render: accountViews.account,   roles: ['agent', 'dialer', 'admin'] },
 };
 
 // Routes carrying an ID. Kept out of ROUTES because they never belong in the

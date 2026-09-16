@@ -276,7 +276,16 @@ code {
   font-weight: 500;
 }
 
-.whoami { font-size: 12px; }
+.whoami {
+  display: block;
+  font-size: 12px;
+  text-decoration: none;
+  color: inherit;
+  border-radius: 6px;
+  margin: 0 -6px;
+  padding: 4px 6px;
+}
+.whoami:hover { background: var(--surface-hover, rgba(128,128,128,.12)); }
 .whoami__name { font-weight: 500; }
 .whoami__role { color: var(--text-muted); text-transform: capitalize; }
 

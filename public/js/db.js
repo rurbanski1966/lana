@@ -49,6 +49,9 @@ export const auth = {
 
   signOut: () => supabase.auth.signOut(),
 
+  updatePassword: password =>
+    supabase.auth.updateUser({ password }).then(unwrap),
+
   session: () => supabase.auth.getSession().then(r => r.data.session),
 
   onChange: cb => supabase.auth.onAuthStateChange((_e, session) => cb(session)),
