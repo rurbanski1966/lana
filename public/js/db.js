@@ -566,11 +566,48 @@ export async function scoreForRecording(recordingId) {
   return unwrap(
     await supabase
       .from('call_scores')
-      .select('*')
+      .select('*, overridden_by_profile:profiles!call_scores_overridden_by_fkey(full_name)')
       .eq('recording_id', recordingId)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
+  );
+}
+
+// The one admin-made call that's authoritative for a score — separate from
+// score_reviews, which are independent opinions used to tune the rubric and
+// never override anything on their own. RLS (scores_admin) already restricts
+// this write to admins; nothing further to check client-side.
+export async function saveScoreOverride(scoreId, patch) {
+  const session = await requireSession();
+  return unwrap(
+    await supabase
+      .from('call_scores')
+      .update({
+        manual_overall_score: patch.overall_score,
+        manual_dimensions: patch.dimensions,
+        manual_compliance_passed: patch.compliance_passed,
+        manual_findings: patch.findings,
+        manual_notes: patch.notes || '',
+        is_overridden: true,
+        overridden_by: session.user.id,
+        overridden_at: new Date().toISOString(),
+      })
+      .eq('id', scoreId)
+      .select()
+      .single()
+  );
+}
+
+export async function clearScoreOverride(scoreId) {
+  await requireSession();
+  return unwrap(
+    await supabase
+      .from('call_scores')
+      .update({ is_overridden: false })
+      .eq('id', scoreId)
+      .select()
+      .single()
   );
 }
 

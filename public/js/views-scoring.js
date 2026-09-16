@@ -35,8 +35,12 @@ const SCORE_MAX = 100;
 // list. The rubric is editable, so a score from an older version may carry
 // dimensions that no longer exist — and a newer one may add some. Iterating a
 // hardcoded list would silently drop both.
-const dimensionEntries = score =>
-  Object.entries(score?.dimensions ?? {}).filter(([, v]) => v && typeof v === 'object');
+const entriesOf = dims => Object.entries(dims ?? {}).filter(([, v]) => v && typeof v === 'object');
+
+// Calibration (score_reviews) always compares against the model's own
+// dimensions, regardless of any override — it's tuning the rubric, not
+// reading the authoritative number. Keep this reading raw score.dimensions.
+const dimensionEntries = score => entriesOf(score?.dimensions);
 
 // Label precedence: the one stamped on the score when it was graded, then the
 // current config, then a readable form of the key. The stamped label is first
@@ -335,6 +339,7 @@ export async function reviewDetail(main, ctx, recordingId) {
       </div>
 
       <div id="score-area">${score ? scoreHtml(score) : ''}</div>
+      <div id="override-area">${score && ctx.profile.role === 'admin' ? spinner() : ''}</div>
       <div id="review-area">${score ? spinner() : ''}</div>
 
       ${rec.transcript ? `
@@ -356,6 +361,7 @@ export async function reviewDetail(main, ctx, recordingId) {
         </div>` : ''}`;
 
     document.getElementById('reload').addEventListener('click', draw);
+    if (score && ctx.profile.role === 'admin') drawOverride(score, draw);
     if (score) drawReview(score);
 
     document.getElementById('play')?.addEventListener('click', async e => {
@@ -428,6 +434,179 @@ export async function reviewDetail(main, ctx, recordingId) {
   }
 
   await draw();
+}
+
+/* --- manual override ------------------------------------------------------
+   The one admin-made call that's authoritative for a score. Editing starts
+   from the model's own numbers so an admin only has to change what's
+   actually wrong — re-typing everything to agree with the model would be
+   friction with no purpose. Separate from score_reviews below, which never
+   overrides anything on its own.
+   -------------------------------------------------------------------------- */
+function overrideFindingRow(f, idx) {
+  return `<div class="rrow" data-idx="${idx}">
+    <div style="flex:1;min-width:180px">
+      <strong>${esc(FINDING_CODES[f.code] || f.code)}</strong>
+      <div class="muted" style="font-size:12px">${esc(f.detail || '')}</div>
+    </div>
+    <select data-f="severity">
+      ${FINDING_SEVERITIES.map(s => `<option value="${s.value}"${s.value === f.severity ? ' selected' : ''}>${s.label}</option>`).join('')}
+    </select>
+    <label style="display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap">
+      <input type="checkbox" data-f="dismissed"${f.dismissed ? ' checked' : ''}> Dismiss
+    </label>
+  </div>`;
+}
+
+async function drawOverride(score, onSaved) {
+  const host = document.getElementById('override-area');
+  if (!host) return;
+
+  let editing = false;
+  render();
+
+  function render() {
+    host.innerHTML = editing ? editorHtml() : summaryHtml();
+    wire();
+  }
+
+  function summaryHtml() {
+    return `
+      <div class="card">
+        <div class="card__head">
+          <h2>Manual override</h2>
+          ${score.is_overridden
+            ? `<span class="chip chip--warning"><span aria-hidden="true">!</span>Active</span>`
+            : `<span class="muted">Not overridden</span>`}
+        </div>
+        <p class="muted" style="margin:0 0 14px">
+          ${score.is_overridden
+            ? (score.manual_notes ? esc(score.manual_notes) : 'No note left for this override.')
+            : "The model's score stands. Override it if a reviewer disagrees — the model's own numbers stay visible, this just decides which one counts."}
+        </p>
+        <div style="display:flex;gap:10px">
+          <button class="btn ${score.is_overridden ? '' : 'btn--primary'}" type="button" id="ov-edit">
+            ${score.is_overridden ? 'Edit override' : 'Override this score'}
+          </button>
+          ${score.is_overridden ? `<button class="btn btn--ghost" type="button" id="ov-clear">Revert to model score</button>` : ''}
+        </div>
+      </div>`;
+  }
+
+  function editorHtml() {
+    const modelDims = entriesOf(score.dimensions);
+    const manualDims = score.manual_dimensions ?? score.dimensions ?? {};
+    const findings = (score.manual_findings ?? score.findings ?? []).map(f => ({ dismissed: false, ...f }));
+    const complianceNow = score.is_overridden ? score.manual_compliance_passed : score.compliance_passed;
+
+    return `
+      <div class="card">
+        <div class="card__head"><h2>Override this score</h2></div>
+        <form id="override-form">
+          <div class="grid-2">
+            <label class="field">
+              <span>Overall score * <span class="muted">(model said ${score.overall_score})</span></span>
+              <input type="number" id="ov-overall" min="0" max="100" required
+                     value="${esc(score.is_overridden ? score.manual_overall_score : score.overall_score)}">
+            </label>
+            <label class="field">
+              <span>Compliance verdict</span>
+              <select id="ov-compliance">
+                <option value="true"${complianceNow ? ' selected' : ''}>Pass</option>
+                <option value="false"${!complianceNow ? ' selected' : ''}>Fail</option>
+              </select>
+            </label>
+          </div>
+
+          <h3 style="margin:18px 0 8px">By dimension</h3>
+          <div class="grid-2" id="ov-dims">
+            ${modelDims.map(([key, v]) => `
+              <label class="field" data-dim="${esc(key)}">
+                <span>${esc(dimLabel(key, v))} <span class="muted">(model ${v.score ?? 0})</span></span>
+                <input type="number" min="0" max="100" data-f="score"
+                       value="${esc(manualDims?.[key]?.score ?? v.score ?? 0)}">
+              </label>`).join('')}
+          </div>
+
+          ${findings.length ? `
+            <h3 style="margin:18px 0 8px">Compliance findings</h3>
+            <p class="muted" style="margin:0 0 10px;font-size:12px">
+              Re-grade severity or dismiss a finding the model got wrong — the code, detail and evidence stay as scored.
+            </p>
+            <div id="ov-findings">${findings.map(overrideFindingRow).join('')}</div>` : ''}
+
+          <label class="field" style="margin-top:18px">
+            <span>Note <span class="muted">(why this was changed)</span></span>
+            <textarea id="ov-notes" rows="3">${esc(score.manual_notes || '')}</textarea>
+          </label>
+
+          <div style="display:flex;gap:10px;margin-top:14px">
+            <button class="btn btn--primary" type="submit" id="ov-save">Save override</button>
+            <button class="btn btn--ghost" type="button" id="ov-cancel">Cancel</button>
+          </div>
+        </form>
+      </div>`;
+  }
+
+  function wire() {
+    document.getElementById('ov-edit')?.addEventListener('click', () => { editing = true; render(); });
+    document.getElementById('ov-cancel')?.addEventListener('click', () => { editing = false; render(); });
+
+    document.getElementById('ov-clear')?.addEventListener('click', async () => {
+      if (!confirm('Revert to the model score? Your override values are kept and can be re-applied later.')) return;
+      try {
+        await db.clearScoreOverride(score.id);
+        toast('Reverted to model score.', 'ok');
+        onSaved();
+      } catch (err) { toast(err.message, 'error'); }
+    });
+
+    document.getElementById('override-form')?.addEventListener('submit', async e => {
+      e.preventDefault();
+      const btn = document.getElementById('ov-save');
+
+      const overall = Number(document.getElementById('ov-overall').value);
+      if (!Number.isFinite(overall) || overall < 0 || overall > 100) {
+        return toast('Enter a valid overall score (0-100).', 'error');
+      }
+
+      const dimensions = {};
+      document.querySelectorAll('#ov-dims [data-dim]').forEach(row => {
+        const key = row.dataset.dim;
+        const n = Number(row.querySelector('[data-f="score"]').value);
+        const modelEntry = score.dimensions?.[key] ?? {};
+        dimensions[key] = { ...modelEntry, score: Number.isFinite(n) ? n : modelEntry.score };
+      });
+
+      const baseFindings = score.manual_findings ?? score.findings ?? [];
+      const findings = [...document.querySelectorAll('#ov-findings [data-idx]')].map(row => {
+        const idx = Number(row.dataset.idx);
+        return {
+          ...baseFindings[idx],
+          severity: row.querySelector('[data-f="severity"]').value,
+          dismissed: row.querySelector('[data-f="dismissed"]').checked,
+        };
+      });
+
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        await db.saveScoreOverride(score.id, {
+          overall_score: overall,
+          dimensions,
+          compliance_passed: document.getElementById('ov-compliance').value === 'true',
+          findings,
+          notes: document.getElementById('ov-notes').value.trim(),
+        });
+        toast('Override saved.', 'ok');
+        onSaved();
+      } catch (err) {
+        toast(err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Save override';
+      }
+    });
+  }
 }
 
 /* --- human grading -------------------------------------------------------
@@ -563,25 +742,55 @@ async function drawReview(score) {
   });
 }
 
+// The model's own columns never change after scoring; is_overridden picks
+// which set — model or manual — actually counts. Kept in one place so the
+// summary tiles, dimension bars and findings table can't disagree about it.
+function effectiveOf(score) {
+  return {
+    overall_score: score.is_overridden ? score.manual_overall_score : score.overall_score,
+    dimensions: score.is_overridden ? (score.manual_dimensions ?? score.dimensions) : score.dimensions,
+    compliance_passed: score.is_overridden ? score.manual_compliance_passed : score.compliance_passed,
+    findings: (score.is_overridden ? (score.manual_findings ?? score.findings) : score.findings) ?? [],
+  };
+}
+
 function scoreHtml(score) {
-  const findings = Array.isArray(score.findings) ? score.findings : [];
+  const eff = effectiveOf(score);
   const strengths = Array.isArray(score.strengths) ? score.strengths : [];
   const improvements = Array.isArray(score.improvements) ? score.improvements : [];
+  const visibleFindings = eff.findings.filter(f => !f.dismissed);
 
   return `
+    ${score.is_overridden ? `
+      <div class="card" style="border-color:var(--warning)">
+        <div class="card__head">
+          <h2>Manually overridden</h2>
+          <span class="chip chip--warning"><span aria-hidden="true">!</span>Overridden</span>
+        </div>
+        <p class="muted" style="margin:0">
+          By ${esc(score.overridden_by_profile?.full_name || 'an admin')}
+          ${score.overridden_at ? `· ${esc(fmtDate(score.overridden_at))}` : ''}
+          ${score.manual_notes ? `— ${esc(score.manual_notes)}` : ''}
+        </p>
+      </div>` : ''}
+
     <div class="kpis">
       ${statTile({
         label: 'Overall score',
-        value: String(score.overall_score),
-        note: score.coaching_focus ? `Focus: ${esc(score.coaching_focus)}` : '',
-        meter: { pct: score.overall_score, aria: `${score.overall_score} out of 100` },
+        value: String(eff.overall_score),
+        note: score.is_overridden
+          ? `Model scored ${score.overall_score}`
+          : (score.coaching_focus ? `Focus: ${esc(score.coaching_focus)}` : ''),
+        meter: { pct: eff.overall_score, aria: `${eff.overall_score} out of 100` },
       })}
       ${statTile({
         label: 'Compliance',
-        value: score.compliance_passed ? 'Pass' : 'Fail',
-        note: findings.length
-          ? `${fmtNum(findings.length)} finding${findings.length === 1 ? '' : 's'}`
-          : 'No findings',
+        value: eff.compliance_passed ? 'Pass' : 'Fail',
+        note: score.is_overridden
+          ? `Model said ${score.compliance_passed ? 'pass' : 'fail'}`
+          : (visibleFindings.length
+            ? `${fmtNum(visibleFindings.length)} finding${visibleFindings.length === 1 ? '' : 's'}`
+            : 'No findings'),
       })}
       ${statTile({
         label: 'Cost to score',
@@ -601,12 +810,13 @@ function scoreHtml(score) {
     <div class="card">
       <div class="card__head"><h2>By dimension</h2><span class="muted">Scored 0–100</span></div>
       <div class="bars">
-        ${dimensionEntries(score).map(([key, v]) => {
+        ${entriesOf(eff.dimensions).map(([key, v]) => {
           const n = Number(v.score) || 0;
+          const modelN = Number(score.dimensions?.[key]?.score) || 0;
           return barRow({
             rank: null,
             label: dimLabel(key, v),
-            sub: null,
+            sub: score.is_overridden && n !== modelN ? `Model said ${modelN}` : null,
             value: n,
             display: String(n),
             max: SCORE_MAX,
@@ -630,12 +840,12 @@ function scoreHtml(score) {
     <div class="card">
       <div class="card__head">
         <h2>Compliance findings</h2>
-        <span class="muted">${score.compliance_passed ? 'Passed' : 'Needs attention'}</span>
+        <span class="muted">${eff.compliance_passed ? 'Passed' : 'Needs attention'}</span>
       </div>
-      ${findings.length === 0 ? empty('No compliance issues found.') : `
+      ${visibleFindings.length === 0 ? empty('No compliance issues found.') : `
         <div class="tablewrap"><table>
           <thead><tr><th>Issue</th><th>Severity</th><th>Detail</th></tr></thead>
-          <tbody>${findings.map(f => `
+          <tbody>${visibleFindings.map(f => `
             <tr>
               <td>${esc(FINDING_CODES[f.code] || f.code)}</td>
               <td>${severityChip(f.severity)}</td>
@@ -644,6 +854,10 @@ function scoreHtml(score) {
             </tr>`).join('')}
           </tbody>
         </table></div>`}
+      ${score.is_overridden && eff.findings.some(f => f.dismissed)
+        ? `<p class="muted" style="font-size:12px;margin:10px 0 0">
+             ${fmtNum(eff.findings.filter(f => f.dismissed).length)} finding${eff.findings.filter(f => f.dismissed).length === 1 ? '' : 's'} dismissed on override.
+           </p>` : ''}
     </div>
 
     <div class="card">
