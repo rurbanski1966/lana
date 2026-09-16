@@ -577,6 +577,13 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 .turn__text { white-space: pre-wrap; word-break: break-word; }
 
+/* Seekable transcript lines and coaching quotes that jump to one. */
+.turn--clickable { cursor: pointer; }
+.turn--clickable:hover { background: var(--surface-hover, rgba(128, 128, 128, .12)); }
+.turn--flash { outline: 2px solid var(--warning); outline-offset: -2px; }
+.evidence--jump { cursor: pointer; }
+.evidence--jump:hover { text-decoration: underline; }
+
 @media (max-width: 620px) {
   .turn, .turn--plain { grid-template-columns: 1fr; gap: 2px; }
   .turn__no { display: none; }

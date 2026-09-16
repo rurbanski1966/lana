@@ -69,7 +69,10 @@ const fmtDuration = seconds => {
 // which is the entire point of showing the transcript.
 const SPEAKER_RE = /^\s*([A-Za-z][\w .'’-]{0,28}?)\s*:\s*(.*)$/;
 
-function transcriptHtml(text) {
+// Shared with matchQuoteToTurn() below — "turn 4" has to mean the same line
+// whether it's the transcript view rendering it or a coaching quote jumping
+// to it.
+function parseTurns(text) {
   const lines = String(text || '').split(/\r?\n/);
   const turns = [];
 
@@ -85,8 +88,18 @@ function transcriptHtml(text) {
       turns.push({ who: null, text: line });
     }
   }
+  return turns;
+}
 
+function transcriptHtml(text, segments) {
+  const turns = parseTurns(text);
   if (turns.length === 0) return empty('Transcript is empty.');
+
+  // Deepgram's segments are one-per-line in the same order the transcript
+  // was written in. If the counts don't match, the transcript was edited by
+  // hand after transcription and the alignment can no longer be trusted —
+  // render without seek points rather than pointing at the wrong line.
+  const timed = Array.isArray(segments) && segments.length === turns.length;
 
   // Stable speaker ordering so the same person keeps the same side/indent
   // through the whole call, regardless of who talks first.
@@ -94,13 +107,45 @@ function transcriptHtml(text) {
 
   return `<div class="transcript">${turns.map((t, i) => {
     const idx = t.who ? speakers.indexOf(t.who) % 2 : 0;
+    const start = timed ? segments[i].start : null;
     return `
-      <div class="turn${t.who ? ` turn--s${idx}` : ' turn--plain'}">
+      <div class="turn${t.who ? ` turn--s${idx}` : ' turn--plain'}${start != null ? ' turn--clickable' : ''}"
+           id="turn-${i}"${start != null ? ` data-start="${esc(start)}" tabindex="0" role="button" title="Play from here"` : ''}>
         <div class="turn__no">${i + 1}</div>
         ${t.who ? `<div class="turn__who">${esc(t.who)}</div>` : '<div class="turn__who"></div>'}
         <div class="turn__text">${esc(t.text)}</div>
       </div>`;
   }).join('')}</div>`;
+}
+
+const normalizeForMatch = s =>
+  String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+
+// Evidence quotes are meant to be verbatim, so a substring match should catch
+// most of them; a lightly paraphrased or trimmed quote falls back to whoever
+// shares the most words. Returns a turn index, or -1 when nothing is close
+// enough to point at with any confidence.
+function matchQuoteToTurn(quote, turns) {
+  const nq = normalizeForMatch(quote);
+  if (!nq) return -1;
+  const normTurns = turns.map(t => normalizeForMatch(t.text));
+
+  const exact = normTurns.findIndex(nt => nt && (nt.includes(nq) || nq.includes(nt)));
+  if (exact !== -1) return exact;
+
+  const qWords = new Set(nq.split(' ').filter(w => w.length > 3));
+  if (qWords.size === 0) return -1;
+
+  let best = -1;
+  let bestScore = 0;
+  normTurns.forEach((nt, i) => {
+    const tWords = new Set(nt.split(' '));
+    let shared = 0;
+    qWords.forEach(w => { if (tWords.has(w)) shared++; });
+    const score = shared / qWords.size;
+    if (score > bestScore) { bestScore = score; best = i; }
+  });
+  return bestScore >= 0.5 ? best : -1;
 }
 
 /* === Review list ========================================================== */
@@ -294,6 +339,7 @@ export async function reviewDetail(main, ctx, recordingId) {
 
     const score = rec.status === 'scored' ? await db.scoreForRecording(rec.id) : null;
     const busy = rec.status === 'transcribing' || rec.status === 'scoring';
+    const turns = parseTurns(rec.transcript);
 
     main.innerHTML = `
       <div class="page__head">
@@ -338,7 +384,7 @@ export async function reviewDetail(main, ctx, recordingId) {
           </form>` : ''}
       </div>
 
-      <div id="score-area">${score ? scoreHtml(score) : ''}</div>
+      <div id="score-area">${score ? scoreHtml(score, turns) : ''}</div>
       <div id="override-area">${score && ctx.profile.role === 'admin' ? spinner() : ''}</div>
       <div id="review-area">${score ? spinner() : ''}</div>
 
@@ -356,7 +402,7 @@ export async function reviewDetail(main, ctx, recordingId) {
             <button class="btn btn--ghost btn--sm" id="copy-transcript">Copy transcript</button>
             <button class="btn btn--ghost btn--sm" id="toggle-wrap">Toggle raw text</button>
           </div>
-          <div id="transcript-view">${transcriptHtml(rec.transcript)}</div>
+          <div id="transcript-view">${transcriptHtml(rec.transcript, rec.transcript_segments)}</div>
           <pre id="transcript-raw" class="transcript-raw" hidden>${esc(rec.transcript)}</pre>
         </div>` : ''}`;
 
@@ -369,10 +415,53 @@ export async function reviewDetail(main, ctx, recordingId) {
       try {
         const url = await db.audioUrl(rec.storage_path);
         document.getElementById('player').innerHTML =
-          `<audio controls src="${esc(url)}" style="width:100%"></audio>`;
+          `<audio controls id="rec-audio" src="${esc(url)}" style="width:100%"></audio>`;
       } catch (err) {
         toast(err.message, 'error');
         e.target.disabled = false;
+      }
+    });
+
+    // Loads the player on demand — a transcript line or a coaching quote can
+    // be clicked before "Play audio" ever was — then seeks once the audio
+    // actually has a duration to seek within.
+    async function ensureAudioAndSeek(startSeconds) {
+      if (!rec.storage_path || !Number.isFinite(startSeconds)) return;
+      let audio = document.getElementById('rec-audio');
+      if (!audio) {
+        try {
+          const url = await db.audioUrl(rec.storage_path);
+          document.getElementById('player').innerHTML =
+            `<audio controls id="rec-audio" src="${esc(url)}" style="width:100%"></audio>`;
+          audio = document.getElementById('rec-audio');
+        } catch (err) {
+          toast(err.message, 'error');
+          return;
+        }
+      }
+      const seek = () => { audio.currentTime = startSeconds; audio.play(); };
+      if (audio.readyState >= 1) seek();
+      else audio.addEventListener('loadedmetadata', seek, { once: true });
+    }
+
+    // Clicking a transcript line seeks the audio there directly.
+    document.getElementById('transcript-view')?.addEventListener('click', e => {
+      const turnEl = e.target.closest('.turn--clickable');
+      if (turnEl) ensureAudioAndSeek(Number(turnEl.dataset.start));
+    });
+
+    // Clicking a coaching evidence quote scrolls to the transcript line it
+    // matched and seeks the audio there — the quote is what the model says
+    // proves the score, so verifying it in context is the whole point.
+    document.getElementById('score-area')?.addEventListener('click', e => {
+      const jumpEl = e.target.closest('[data-turn]');
+      if (!jumpEl) return;
+      const turnEl = document.getElementById(`turn-${jumpEl.dataset.turn}`);
+      if (turnEl) {
+        turnEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        turnEl.classList.add('turn--flash');
+        setTimeout(() => turnEl.classList.remove('turn--flash'), 1500);
+        if (turnEl.dataset.start !== undefined) ensureAudioAndSeek(Number(turnEl.dataset.start));
       }
     });
 
@@ -754,7 +843,21 @@ function effectiveOf(score) {
   };
 }
 
-function scoreHtml(score) {
+// Wraps an evidence quote so a click scrolls the transcript to the matching
+// line and seeks the audio there — but only when a match was actually found;
+// an unmatched quote (paraphrased, or from a manually pasted transcript with
+// no timing) stays plain text rather than promising a jump that goes nowhere.
+function evidenceHtml(text, turns, { inline = false } = {}) {
+  if (!text) return '';
+  const idx = matchQuoteToTurn(text, turns);
+  const jumpAttrs = idx !== -1 ? ` data-turn="${idx}" role="button" tabindex="0" title="Play from here"` : '';
+  const jumpClass = idx !== -1 ? ' evidence--jump' : '';
+  return inline
+    ? `<br><span class="muted evidence${jumpClass}" style="font-size:12px"${jumpAttrs}>“${esc(text)}”</span>`
+    : `<blockquote class="evidence${jumpClass}" style="margin:0;padding-left:12px;border-left:2px solid var(--grid);font-size:13px"${jumpAttrs}>${esc(text)}</blockquote>`;
+}
+
+function scoreHtml(score, turns = []) {
   const eff = effectiveOf(score);
   const strengths = Array.isArray(score.strengths) ? score.strengths : [];
   const improvements = Array.isArray(score.improvements) ? score.improvements : [];
@@ -831,7 +934,7 @@ function scoreHtml(score) {
               <div>
                 <strong>${esc(dimLabel(key, v))} — ${esc(v.score ?? 0)}</strong>
                 <div class="muted" style="margin:4px 0">${esc(v.rationale || '')}</div>
-                ${v.evidence ? `<blockquote style="margin:0;padding-left:12px;border-left:2px solid var(--grid);font-size:13px">${esc(v.evidence)}</blockquote>` : ''}
+                ${evidenceHtml(v.evidence, turns)}
               </div>`).join('')}
         </div>
       </details>
@@ -850,7 +953,7 @@ function scoreHtml(score) {
               <td>${esc(FINDING_CODES[f.code] || f.code)}</td>
               <td>${severityChip(f.severity)}</td>
               <td>${esc(f.detail || '')}
-                ${f.evidence ? `<br><span class="muted" style="font-size:12px">“${esc(f.evidence)}”</span>` : ''}</td>
+                ${evidenceHtml(f.evidence, turns, { inline: true })}</td>
             </tr>`).join('')}
           </tbody>
         </table></div>`}

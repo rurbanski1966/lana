@@ -17,7 +17,9 @@
 //      who owns it, so there is nothing for RLS to decide.
 //
 // Swapping providers means replacing transcribe() and nothing else — its whole
-// contract is: signed URL in, plain text out.
+// contract is: signed URL in, { text, segments } out. segments is null when
+// the provider gave no per-utterance timing (or wasn't diarized) — the
+// transcript still works, it just can't be seeked to a specific line.
 // ---------------------------------------------------------------------------
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -65,7 +67,9 @@ function classifyCaller(req: Request) {
   return { kind: 'user' as const, via: 'jwt' };
 }
 
-async function transcribe(audioUrl: string): Promise<string> {
+type Segment = { start: number; end: number; speaker: number; text: string };
+
+async function transcribe(audioUrl: string): Promise<{ text: string; segments: Segment[] | null }> {
   const key = Deno.env.get('DEEPGRAM_API_KEY');
   if (!key) {
     throw new Error(
@@ -95,16 +99,26 @@ async function transcribe(audioUrl: string): Promise<string> {
   const utterances = data?.results?.utterances;
 
   // Speaker labels matter — the rubric grades the agent, not the prospect.
+  // Keep each utterance's start time too: it's what lets the transcript view
+  // seek the audio player to the line a coaching quote came from, one line
+  // of text mapping to one array entry in the same order.
   if (Array.isArray(utterances) && utterances.length > 0) {
-    return utterances
-      .map((u: { speaker?: number; transcript?: string }) =>
-        `Speaker ${u.speaker ?? 0}: ${u.transcript ?? ''}`.trim())
-      .join('\n');
+    const segments: Segment[] = utterances.map(
+      (u: { start?: number; end?: number; speaker?: number; transcript?: string }) => ({
+        start: u.start ?? 0,
+        end: u.end ?? 0,
+        speaker: u.speaker ?? 0,
+        text: u.transcript ?? '',
+      })
+    );
+    const text = segments.map(s => `Speaker ${s.speaker}: ${s.text}`.trim()).join('\n');
+    return { text, segments };
   }
 
   // An undiarized transcript still scores, just worse — better than failing.
+  // There's no per-line timing to align to, so no segments.
   const flat = data?.results?.channels?.[0]?.alternatives?.[0]?.transcript;
-  if (typeof flat === 'string' && flat.trim()) return flat.trim();
+  if (typeof flat === 'string' && flat.trim()) return { text: flat.trim(), segments: null };
 
   throw new Error('Transcription returned no text. The audio may be silent or unreadable.');
 }
@@ -216,12 +230,13 @@ Deno.serve(async req => {
       throw new Error(signError?.message ?? 'Could not sign the audio URL.');
     }
 
-    const transcript = await transcribe(signed.signedUrl);
+    const { text: transcript, segments } = await transcribe(signed.signedUrl);
 
     await serviceClient
       .from('call_recordings')
       .update({
         transcript,
+        transcript_segments: segments,
         transcript_source: 'deepgram',
         status: 'transcribed',
         updated_at: new Date().toISOString(),

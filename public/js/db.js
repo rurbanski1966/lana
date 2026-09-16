@@ -483,7 +483,7 @@ export async function getRecording(id) {
   return unwrap(
     await supabase
       .from('call_recordings')
-      .select(`${RECORDING_COLS}, transcript`)
+      .select(`${RECORDING_COLS}, transcript, transcript_segments`)
       .eq('id', id)
       .maybeSingle()
   );
