@@ -127,25 +127,40 @@ const normalizeForMatch = s =>
 // enough to point at with any confidence.
 function matchQuoteToTurn(quote, turns) {
   const nq = normalizeForMatch(quote);
-  if (!nq) return -1;
+  if (!nq || turns.length === 0) return -1;
   const normTurns = turns.map(t => normalizeForMatch(t.text));
 
-  const exact = normTurns.findIndex(nt => nt && (nt.includes(nq) || nq.includes(nt)));
-  if (exact !== -1) return exact;
-
-  const qWords = new Set(nq.split(' ').filter(w => w.length > 3));
-  if (qWords.size === 0) return -1;
-
-  let best = -1;
-  let bestScore = 0;
-  normTurns.forEach((nt, i) => {
-    const tWords = new Set(nt.split(' '));
-    let shared = 0;
-    qWords.forEach(w => { if (tWords.has(w)) shared++; });
-    const score = shared / qWords.size;
-    if (score > bestScore) { bestScore = score; best = i; }
+  // Search the whole transcript as one string first, not turn-by-turn — a
+  // verbatim quote can start in one turn and run into the next if Deepgram
+  // split an utterance mid-sentence, so no single turn would contain it.
+  let offset = 0;
+  const starts = normTurns.map(nt => {
+    const s = offset;
+    offset += nt.length + 1; // +1 for the joining space below
+    return s;
   });
-  return bestScore >= 0.5 ? best : -1;
+  const at = normTurns.join(' ').indexOf(nq);
+  if (at !== -1) {
+    let idx = 0;
+    for (let i = 0; i < starts.length && starts[i] <= at; i++) idx = i;
+    return idx;
+  }
+
+  // No verbatim hit — the model paraphrased or trimmed the quote. Only trust
+  // a fallback when one turn is an unambiguous best fit: a weak or generic
+  // word-overlap match is worse than no jump, since a call full of common
+  // insurance-sales vocabulary can score two unrelated lines almost equally
+  // and land on the wrong one.
+  const qWords = [...new Set(nq.split(' ').filter(w => w.length > 4))];
+  if (qWords.length < 3) return -1;
+
+  const scores = normTurns.map(nt => {
+    const tWords = new Set(nt.split(' '));
+    return qWords.filter(w => tWords.has(w)).length / qWords.length;
+  });
+  const best = scores.reduce((b, s, i) => (s > scores[b] ? i : b), 0);
+  const runnerUp = Math.max(0, ...scores.filter((_, i) => i !== best));
+  return scores[best] >= 0.8 && scores[best] - runnerUp >= 0.25 ? best : -1;
 }
 
 /* === Review list ========================================================== */
