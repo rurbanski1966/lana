@@ -173,6 +173,7 @@ export async function reviews(main, ctx) {
       <div class="page__sub">Upload a call or paste a transcript, then score it</div>
     </div></div>
     <div class="card" id="new" style="max-width:680px">${spinner()}</div>
+    <div class="card" id="edit-card" style="max-width:680px" hidden></div>
     <div class="card" id="list">${spinner()}</div>`;
 
   const people = isAdmin ? await db.listAgents() : [];
@@ -322,18 +323,118 @@ export async function reviews(main, ctx) {
         <thead><tr>
           <th>Date</th><th>Call</th><th>Agent</th><th>Length</th><th>Status</th><th></th>
         </tr></thead>
-        <tbody>${rows.map(r => `
-          <tr>
+        <tbody>${rows.map(r => {
+          // Mirrors RLS: an admin can touch any row; anyone else only their
+          // own upload, and only before scoring has committed it — matches
+          // recordings_update_own's own status check, so a click here never
+          // fails against a rule the button should have hidden for.
+          const canEdit = isAdmin || (r.uploaded_by === ctx.profile.id && ['uploaded', 'transcribed', 'failed'].includes(r.status));
+          const canDelete = isAdmin || r.uploaded_by === ctx.profile.id;
+          return `
+          <tr data-id="${esc(r.id)}">
             <td class="tnum">${esc(fmtDate(r.call_on))}</td>
             <td>${esc(r.title || 'Untitled call')}${r.error_message
               ? `<br><span class="muted">${esc(r.error_message.slice(0, 80))}</span>` : ''}</td>
             <td>${esc(r.agent?.full_name || r.agent_name || '—')}</td>
             <td class="tnum muted">${esc(fmtDuration(r.duration_seconds))}</td>
             <td>${statusChipFor(r.status)}</td>
-            <td><a class="btn btn--ghost btn--sm" href="#/reviews/${esc(r.id)}">Open</a></td>
-          </tr>`).join('')}
+            <td style="display:flex;gap:6px;flex-wrap:wrap">
+              <a class="btn btn--ghost btn--sm" href="#/reviews/${esc(r.id)}">Open</a>
+              ${canEdit ? `<button class="btn btn--ghost btn--sm" data-action="edit" type="button">Edit</button>` : ''}
+              ${canDelete ? `<button class="btn btn--ghost btn--sm" data-action="delete" type="button">Delete</button>` : ''}
+            </td>
+          </tr>`;
+        }).join('')}
         </tbody>
       </table></div>`;
+
+    list.querySelectorAll('tr[data-id]').forEach(tr => {
+      const id = tr.dataset.id;
+      const row = rows.find(r => r.id === id);
+
+      tr.querySelector('[data-action="edit"]')?.addEventListener('click', () => renderEditForm(row));
+
+      tr.querySelector('[data-action="delete"]')?.addEventListener('click', async () => {
+        if (!confirm(`Delete "${row.title || 'Untitled call'}"? This removes the call record, its transcript, and any score. This cannot be undone.`)) return;
+        try {
+          await db.deleteRecording(id);
+          toast('Call deleted.', 'ok');
+          if (editCard.dataset.editing === id) editCard.hidden = true;
+          draw();
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      });
+    });
+  }
+
+  /* --- edit --- */
+  const editCard = document.getElementById('edit-card');
+
+  function renderEditForm(row) {
+    editCard.hidden = false;
+    editCard.dataset.editing = row.id;
+    const currentAgentName = row.agent?.full_name || row.agent_name || '';
+
+    editCard.innerHTML = `
+      <div class="card__head"><h2>Edit call</h2></div>
+      <form id="edit-form">
+        <div class="grid-2">
+          <label class="field">
+            <span>Title</span>
+            <input type="text" id="ed-title" maxlength="120" value="${esc(row.title || '')}">
+          </label>
+          <label class="field">
+            <span>Call date *</span>
+            <input type="date" id="ed-call_on" value="${esc(row.call_on)}" max="${today()}" required>
+          </label>
+        </div>
+        ${isAdmin ? `
+          <label class="field">
+            <span>Agent on the call *</span>
+            <input type="text" id="ed-agent" list="agent-datalist" required value="${esc(currentAgentName)}">
+          </label>` : ''}
+        <div style="display:flex;gap:10px;margin-top:6px">
+          <button class="btn btn--primary" type="submit" id="ed-save">Save changes</button>
+          <button class="btn btn--ghost" type="button" id="ed-cancel">Cancel</button>
+        </div>
+      </form>`;
+
+    editCard.querySelector('#ed-cancel').addEventListener('click', () => {
+      editCard.hidden = true;
+      delete editCard.dataset.editing;
+    });
+
+    editCard.querySelector('#edit-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const patch = {
+        title: editCard.querySelector('#ed-title').value.trim(),
+        call_on: editCard.querySelector('#ed-call_on').value,
+      };
+
+      if (isAdmin) {
+        const typed = editCard.querySelector('#ed-agent').value.trim();
+        if (!typed) return toast('Enter or pick an agent.', 'error');
+        const matchedId = nameToId.get(typed.toLowerCase());
+        patch.agent_id = matchedId || null;
+        patch.agent_name = matchedId ? null : typed;
+      }
+
+      const btn = editCard.querySelector('#ed-save');
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        await db.updateRecording(row.id, patch);
+        toast('Call updated.', 'ok');
+        editCard.hidden = true;
+        delete editCard.dataset.editing;
+        draw();
+      } catch (err) {
+        toast(err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Save changes';
+      }
+    });
   }
 
   await draw();

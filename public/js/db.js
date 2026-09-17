@@ -278,6 +278,18 @@ export async function saveTranscript(id, transcript) {
   );
 }
 
+export async function updateRecording(id, patch) {
+  await requireSession();
+  return unwrap(
+    await supabase
+      .from('call_recordings')
+      .update(patch)
+      .eq('id', id)
+      .select()
+      .single()
+  );
+}
+
 export async function deleteRecording(id) {
   await requireSession();
   const { error } = await supabase.from('call_recordings').delete().eq('id', id);
