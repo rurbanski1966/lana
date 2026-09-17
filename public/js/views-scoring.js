@@ -1170,7 +1170,7 @@ export async function agentLeaderboard(main) {
         <div>${scoreLevelChip('good')} <span class="muted">80% or higher — good to go, no coaching needed.</span></div>
       </div>
     </div>
-    <div class="filters">${selectField('alb-range', 'Period', RANGES, 'month')}</div>
+    <div class="filters">${selectField('alb-range', 'Period', RANGES, 'year')}</div>
     <div id="alb-tabs" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"></div>
     <div class="card" id="alb-body">${spinner()}</div>`;
 
