@@ -495,57 +495,13 @@ export async function scoringLeaderboard(start, end) {
   return unwrap(await supabase.rpc('scoring_leaderboard', { p_start: start, p_end: end }));
 }
 
-/* --- human grading / calibration ----------------------------------------- */
-
-// One review per person per score. Re-grading updates your own row rather than
-// stacking a second opinion from the same head — but two managers can each
-// leave one, and their disagreement is itself signal.
-export async function myReview(scoreId) {
-  const session = await requireSession();
-  return unwrap(
-    await supabase
-      .from('score_reviews')
-      .select('*')
-      .eq('score_id', scoreId)
-      .eq('reviewer_id', session.user.id)
-      .maybeSingle()
-  );
-}
-
-export async function reviewsForScore(scoreId) {
-  await requireSession();
-  return unwrap(
-    await supabase
-      .from('score_reviews')
-      .select('*, profiles:reviewer_id(full_name)')
-      .eq('score_id', scoreId)
-      .order('created_at', { ascending: false })
-  );
-}
-
-export async function saveReview(input) {
-  const session = await requireSession();
-  return unwrap(
-    await supabase
-      .from('score_reviews')
-      .upsert(
-        {
-          score_id: input.score_id,
-          recording_id: input.recording_id,
-          reviewer_id: session.user.id,
-          overall_score: input.overall_score,
-          dimensions: input.dimensions,
-          compliance_agree: input.compliance_agree,
-          notes: input.notes || '',
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'score_id,reviewer_id' }
-      )
-      .select()
-      .single()
-  );
-}
-
+/* --- calibration ----------------------------------------------------------
+   Calibration compares each overridden call's model score against the
+   admin's manual override on it (call_scores.manual_*) — the same
+   per-dimension/per-finding Manual review data already captured in the
+   call detail page. There's no separate "grade it again" step; per Ryan
+   2026-09-17, that would just duplicate the manual review sections.
+   -------------------------------------------------------------------------- */
 export async function calibrationByDimension(start, end) {
   await requireSession();
   return unwrap(

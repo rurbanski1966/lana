@@ -627,7 +627,6 @@ export async function reviewDetail(main, ctx, recordingId) {
       <div id="dimensions-area">${score ? spinner() : ''}</div>
       <div id="findings-area">${score ? spinner() : ''}</div>
       <div id="score-footer">${score ? scoreFooterHtml(score) : ''}</div>
-      <div id="review-area">${score ? spinner() : ''}</div>
 
       ${rec.transcript ? `
         <div class="card">
@@ -667,7 +666,6 @@ export async function reviewDetail(main, ctx, recordingId) {
     if (score && ctx.profile.role === 'admin') drawOverride(score, draw);
     if (score) drawDimensions(score, ctx, turns, draw);
     if (score) drawFindings(score, ctx, turns, draw);
-    if (score) drawReview(score);
 
     document.getElementById('reviewer-toggle')?.addEventListener('click', async e => {
       const btn = e.currentTarget;
@@ -1099,139 +1097,6 @@ async function drawOverride(score, onSaved) {
   });
 }
 
-/* --- human grading -------------------------------------------------------
-   Grading a call the model already graded is how the rubric gets tuned. The
-   model's number is shown beside each input on purpose — anchoring is a real
-   risk, but hiding it means reviewers grade a different call in their head
-   than the one being compared, and the deltas become noise.
-   -------------------------------------------------------------------------- */
-async function drawReview(score) {
-  const host = document.getElementById('review-area');
-  if (!host) return;
-
-  const [mine, all] = await Promise.all([
-    db.myReview(score.id),
-    db.reviewsForScore(score.id),
-  ]);
-  const others = all.filter(r => r.id !== mine?.id);
-  const dims = dimensionEntries(score);
-
-  const row = (key, v) => {
-    const modelScore = Number(v.score) || 0;
-    const saved = mine?.dimensions?.[key] ?? {};
-    return `
-      <tr data-dim="${esc(key)}">
-        <td>${esc(dimLabel(key, v))}</td>
-        <td class="num tnum muted">${modelScore}</td>
-        <td class="num"><input type="number" min="0" max="100" step="1" data-score
-              value="${saved.score ?? ''}" placeholder="—" style="width:80px;text-align:right"></td>
-        <td><input type="text" data-note maxlength="200" value="${esc(saved.note ?? '')}"
-              placeholder="Why (optional)"></td>
-      </tr>`;
-  };
-
-  host.innerHTML = `
-    <div class="card">
-      <div class="card__head">
-        <h2>Your grade</h2>
-        <span class="muted">${mine ? 'You graded this — editing updates it' : 'Not graded yet'}</span>
-      </div>
-      <p class="muted" style="margin:0 0 14px;font-size:13px">
-        Score the same call yourself. The gaps between your numbers and the model's
-        are what the Calibration page uses to show where the rubric needs tightening.
-        Leave a dimension blank to skip it.
-      </p>
-      <form id="review-form">
-        <div class="tablewrap"><table>
-          <thead><tr><th>Dimension</th><th class="num">Model</th><th class="num">You</th><th>Note</th></tr></thead>
-          <tbody>${dims.map(([k, v]) => row(k, v)).join('')}</tbody>
-        </table></div>
-
-        <div class="grid-2" style="margin-top:16px">
-          <label class="field">
-            <span>Your overall score * <span class="muted">(model said ${score.overall_score})</span></span>
-            <input type="number" id="rv-overall" min="0" max="100" step="1" required
-                   value="${mine?.overall_score ?? ''}" placeholder="0–100">
-          </label>
-          <label class="field">
-            <span>Compliance verdict <span class="muted">(model said ${score.compliance_passed ? 'pass' : 'fail'})</span></span>
-            <select id="rv-compliance">
-              <option value=""${mine?.compliance_agree == null ? ' selected' : ''}>Not assessed</option>
-              <option value="true"${mine?.compliance_agree === true ? ' selected' : ''}>I agree with the model</option>
-              <option value="false"${mine?.compliance_agree === false ? ' selected' : ''}>I disagree</option>
-            </select>
-          </label>
-        </div>
-
-        <label class="field">
-          <span>Notes</span>
-          <textarea id="rv-notes" rows="3" maxlength="1000"
-            placeholder="What the model missed, over-weighted, or got right">${esc(mine?.notes ?? '')}</textarea>
-        </label>
-
-        <button class="btn btn--primary" type="submit" id="rv-save">
-          ${mine ? 'Update my grade' : 'Save my grade'}
-        </button>
-      </form>
-
-      ${others.length ? `
-        <h3 style="margin:22px 0 8px">Other reviewers</h3>
-        <div class="tablewrap"><table>
-          <thead><tr><th>Reviewer</th><th class="num">Overall</th><th class="num">vs model</th><th>Notes</th></tr></thead>
-          <tbody>${others.map(o => {
-            const d = o.overall_score - score.overall_score;
-            return `<tr>
-              <td>${esc(o.profiles?.full_name || '—')}</td>
-              <td class="num tnum">${o.overall_score}</td>
-              <td class="num tnum" style="color:${Math.abs(d) > 10 ? 'var(--serious)' : 'var(--text-muted)'}">
-                ${d > 0 ? '+' : ''}${d}</td>
-              <td class="muted">${esc(o.notes || '')}</td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table></div>` : ''}
-    </div>`;
-
-  document.getElementById('review-form').addEventListener('submit', async e => {
-    e.preventDefault();
-    const overall = Number(document.getElementById('rv-overall').value);
-    if (!Number.isFinite(overall) || overall < 0 || overall > 100) {
-      return toast('Overall score must be 0–100.', 'error');
-    }
-
-    const dimensions = {};
-    for (const tr of host.querySelectorAll('tr[data-dim]')) {
-      const raw = tr.querySelector('[data-score]').value.trim();
-      if (raw === '') continue;                      // blank = skipped, not zero
-      const n = Number(raw);
-      if (!Number.isFinite(n) || n < 0 || n > 100) {
-        return toast(`Score for ${tr.dataset.dim} must be 0–100.`, 'error');
-      }
-      dimensions[tr.dataset.dim] = { score: Math.round(n), note: tr.querySelector('[data-note]').value.trim() };
-    }
-
-    const complianceRaw = document.getElementById('rv-compliance').value;
-    const btn = document.getElementById('rv-save');
-    btn.disabled = true;
-    btn.textContent = 'Saving…';
-    try {
-      await db.saveReview({
-        score_id: score.id,
-        recording_id: score.recording_id,
-        overall_score: Math.round(overall),
-        dimensions,
-        compliance_agree: complianceRaw === '' ? null : complianceRaw === 'true',
-        notes: document.getElementById('rv-notes').value.trim(),
-      });
-      toast('Your grade is saved.', 'ok');
-      drawReview(score);
-    } catch (err) {
-      toast(err.message, 'error');
-      btn.disabled = false;
-      btn.textContent = 'Save my grade';
-    }
-  });
-}
-
 // The model's own columns never change after scoring; is_overridden picks
 // which set — model or manual — actually counts. Kept in one place so the
 // summary tiles, dimension bars and findings table can't disagree about it.
@@ -1407,7 +1272,7 @@ export async function calibration(main) {
 
     if (!Number(summary.reviews)) {
       body.innerHTML = `<div class="card">${empty(
-        'No human grades in this period yet. Open a scored call and fill in "Your grade" — this page needs at least a few to say anything useful.'
+        'No manually reviewed calls in this period yet. Use Manual review on a scored call\'s dimensions, findings, or overall score — this page needs at least a few to say anything useful.'
       )}</div>`;
       return;
     }
