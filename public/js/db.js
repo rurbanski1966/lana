@@ -238,9 +238,10 @@ export async function adminReport(start, end) {
 /* --- call scoring -------------------------------------------------------- */
 const RECORDING_COLS =
   'id, agent_id, agent_name, uploaded_by, title, call_on, duration_seconds, storage_path, ' +
-  'transcript_source, status, error_message, created_at, script_id, call_type, ' +
+  'transcript_source, status, error_message, created_at, script_id, call_type, team_id, ' +
   'reviewer_approved, reviewer_approved_at, ' +
   'agent:profiles!call_recordings_agent_id_fkey(full_name), script:scripts(name), ' +
+  'team:teams(name), ' +
   'reviewer:profiles!call_recordings_reviewer_approved_by_fkey(full_name)';
 
 // Deliberately omits `transcript`. A list of 50 calls would otherwise pull
@@ -291,6 +292,7 @@ export async function createRecording(input) {
         appointment_id: input.appointment_id || null,
         script_id: input.script_id || null,
         call_type: input.call_type || null,
+        team_id: input.team_id || null,
         title: input.title || '',
         call_on: input.call_on,
         duration_seconds: input.duration_seconds ?? null,

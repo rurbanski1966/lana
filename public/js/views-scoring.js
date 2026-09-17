@@ -196,6 +196,7 @@ export async function reviews(main, ctx) {
   const people = isAdmin ? await db.listAgents() : [];
   const rememberedNames = isAdmin ? await db.recordingAgentNames() : [];
   const scripts = await db.listScripts({ activeOnly: true });
+  const teams = await db.listTeams();
 
   // Typed against a datalist: matches an existing account's name (case-
   // insensitive) and it's a real agent; anything else is saved as a label
@@ -244,6 +245,17 @@ export async function reviews(main, ctx) {
           <option value="">— none —</option>
           ${CALL_TYPES.map(t => `<option value="${esc(t.value)}">${esc(t.label)}</option>`).join('')}
         </select>
+      </label>
+
+      <label class="field">
+        <span>Team</span>
+        <select id="team_id">
+          <option value="">— none —</option>
+          ${teams.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}
+        </select>
+        <span class="muted" style="font-size:12px">
+          Attributes this call to EWSS or SMC on the leaderboard and spend totals. Leave blank to use the agent's own team.
+        </span>
       </label>
 
       <label class="field">
@@ -343,6 +355,7 @@ export async function reviews(main, ctx) {
         agent_name: agentName,
         script_id: val('script_id') || null,
         call_type: val('call_type') || null,
+        team_id: val('team_id') || null,
         title: val('title'),
         call_on: val('call_on'),
         storage_path: storagePath,
@@ -416,7 +429,7 @@ export async function reviews(main, ctx) {
             <td class="tnum">${esc(fmtDate(r.call_on))}</td>
             <td>${esc(r.title || 'Untitled call')}${r.error_message
               ? `<br><span class="muted">${esc(r.error_message.slice(0, 80))}</span>` : ''}</td>
-            <td>${esc(r.agent?.full_name || r.agent_name || '—')}</td>
+            <td>${esc(r.agent?.full_name || r.agent_name || '—')}${r.team?.name ? `<br><span class="muted">${esc(r.team.name)}</span>` : ''}</td>
             <td class="tnum muted">${esc(fmtDuration(r.duration_seconds))}</td>
             <td>${statusChipFor(r.status)}</td>
             <td>${reviewerStatusChip(r.reviewer_approved)}</td>
@@ -484,6 +497,13 @@ export async function reviews(main, ctx) {
           </select>
         </label>
         <label class="field">
+          <span>Team</span>
+          <select id="ed-team_id">
+            <option value="">— none —</option>
+            ${teams.map(t => `<option value="${esc(t.id)}"${t.id === row.team_id ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="field">
           <span>Script</span>
           <select id="ed-script">
             <option value="">— none / general —</option>
@@ -508,6 +528,7 @@ export async function reviews(main, ctx) {
         call_on: editCard.querySelector('#ed-call_on').value,
         script_id: editCard.querySelector('#ed-script').value || null,
         call_type: editCard.querySelector('#ed-call_type').value || null,
+        team_id: editCard.querySelector('#ed-team_id').value || null,
       };
 
       if (isAdmin) {
@@ -562,6 +583,7 @@ export async function reviewDetail(main, ctx, recordingId) {
           <div class="page__sub">
             ${esc(fmtDate(rec.call_on))} · ${esc(rec.agent?.full_name || rec.agent_name || '—')}
             ${rec.call_type ? ` · ${esc(CALL_TYPES.find(t => t.value === rec.call_type)?.label || rec.call_type)}` : ''}
+            ${rec.team?.name ? ` · Team: ${esc(rec.team.name)}` : ''}
             ${rec.script?.name ? ` · Script: ${esc(rec.script.name)}` : ''} · ${statusChipFor(rec.status)}
           </div>
         </div>
