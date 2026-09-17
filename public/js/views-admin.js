@@ -221,6 +221,172 @@ export async function agents(main, ctx) {
   await draw();
 }
 
+/* === Scripts ================================================================
+   The talk-track an agent is supposed to follow on a call — separate from the
+   rubric (how every call gets graded regardless of which script it was).
+   Selecting one when uploading a call tells score-call what the agent was
+   actually supposed to say, so the model can judge adherence to it directly
+   instead of only the general rubric criteria.
+   -------------------------------------------------------------------------- */
+export async function scripts(main) {
+  main.innerHTML = `
+    <div class="page__head"><div>
+      <h1>Scripts</h1>
+      <div class="page__sub">Talk-tracks agents can be graded against on a call</div>
+    </div>
+    <button class="btn btn--primary" id="new-script-toggle">New script</button></div>
+    <div class="card" id="new-script-card" hidden></div>
+    <div class="card" id="script-list">${spinner()}</div>`;
+
+  const list = document.getElementById('script-list');
+  const newCard = document.getElementById('new-script-card');
+
+  document.getElementById('new-script-toggle').addEventListener('click', () => {
+    newCard.hidden = !newCard.hidden;
+    if (!newCard.hidden) renderNewForm();
+  });
+
+  function renderNewForm() {
+    newCard.innerHTML = `
+      <div class="card__head"><h2>New script</h2></div>
+      <form id="new-script-form">
+        <label class="field">
+          <span>Name *</span>
+          <input type="text" id="ns-name" required maxlength="120" placeholder="e.g. MAPD enrollment script">
+        </label>
+        <label class="field">
+          <span>Script content *</span>
+          <textarea id="ns-content" rows="14" required placeholder="Paste the full talk-track here."></textarea>
+        </label>
+        <button class="btn btn--primary" type="submit" id="ns-save">Save script</button>
+      </form>`;
+
+    newCard.querySelector('#new-script-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const name = newCard.querySelector('#ns-name').value.trim();
+      const content = newCard.querySelector('#ns-content').value.trim();
+      if (!content) return toast('Paste the script content.', 'error');
+
+      const btn = newCard.querySelector('#ns-save');
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        await db.createScript(name, content);
+        toast('Script saved.', 'ok');
+        newCard.hidden = true;
+        draw();
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save script';
+      }
+    });
+  }
+
+  async function draw() {
+    list.innerHTML = spinner();
+    const rows = await db.listScripts();
+
+    if (rows.length === 0) {
+      list.innerHTML = empty('No scripts yet. Add one to make it selectable when uploading a call.');
+      return;
+    }
+
+    list.innerHTML = `
+      <div class="card__head"><h2>${fmtNum(rows.length)} script${rows.length === 1 ? '' : 's'}</h2></div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Name</th><th>Added</th><th>Active</th><th></th></tr></thead>
+        <tbody>${rows.map(r => `
+          <tr data-id="${esc(r.id)}">
+            <td>${esc(r.name)}</td>
+            <td class="tnum muted">${esc(fmtDate(r.created_at))}</td>
+            <td><input type="checkbox" data-field="active"${r.active ? ' checked' : ''}></td>
+            <td style="display:flex;gap:6px">
+              <button class="btn btn--ghost btn--sm" data-action="edit" type="button">Edit</button>
+              <button class="btn btn--ghost btn--sm" data-action="delete" type="button">Delete</button>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>
+      <div id="edit-script-card"></div>`;
+
+    list.querySelectorAll('tr[data-id]').forEach(tr => {
+      const id = tr.dataset.id;
+
+      tr.querySelector('[data-field="active"]').addEventListener('change', async e => {
+        try {
+          await db.updateScript(id, { active: e.target.checked });
+          toast(e.target.checked ? 'Script activated.' : 'Script deactivated.', 'ok');
+        } catch (err) {
+          toast(err.message, 'error');
+          draw();
+        }
+      });
+
+      tr.querySelector('[data-action="delete"]').addEventListener('click', async () => {
+        const name = tr.querySelector('td').textContent;
+        if (!confirm(`Delete "${name}"? Calls already graded against it keep their record; this only removes it from the picker.`)) return;
+        try {
+          await db.deleteScript(id);
+          toast('Script deleted.', 'ok');
+          draw();
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      });
+
+      tr.querySelector('[data-action="edit"]').addEventListener('click', async () => {
+        const full = await db.getScript(id);
+        const editCard = document.getElementById('edit-script-card');
+        editCard.innerHTML = `
+          <div class="card" style="margin-top:14px">
+            <div class="card__head"><h2>Edit script</h2></div>
+            <form id="edit-script-form">
+              <label class="field">
+                <span>Name *</span>
+                <input type="text" id="es-name" required maxlength="120" value="${esc(full.name)}">
+              </label>
+              <label class="field">
+                <span>Script content *</span>
+                <textarea id="es-content" rows="14" required>${esc(full.content)}</textarea>
+              </label>
+              <div style="display:flex;gap:10px">
+                <button class="btn btn--primary" type="submit" id="es-save">Save changes</button>
+                <button class="btn btn--ghost" type="button" id="es-cancel">Cancel</button>
+              </div>
+            </form>
+          </div>`;
+
+        editCard.querySelector('#es-cancel').addEventListener('click', () => { editCard.innerHTML = ''; });
+
+        editCard.querySelector('#edit-script-form').addEventListener('submit', async e => {
+          e.preventDefault();
+          const name = editCard.querySelector('#es-name').value.trim();
+          const content = editCard.querySelector('#es-content').value.trim();
+          if (!content) return toast('Script content cannot be empty.', 'error');
+
+          const btn = editCard.querySelector('#es-save');
+          btn.disabled = true;
+          btn.textContent = 'Saving…';
+          try {
+            await db.updateScript(id, { name, content });
+            toast('Script updated.', 'ok');
+            editCard.innerHTML = '';
+            draw();
+          } catch (err) {
+            toast(err.message, 'error');
+            btn.disabled = false;
+            btn.textContent = 'Save changes';
+          }
+        });
+      });
+    });
+  }
+
+  await draw();
+}
+
 /* === Reports ============================================================== */
 export async function reports(main) {
   main.innerHTML = `

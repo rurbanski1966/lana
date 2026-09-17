@@ -178,6 +178,7 @@ export async function reviews(main, ctx) {
 
   const people = isAdmin ? await db.listAgents() : [];
   const rememberedNames = isAdmin ? await db.recordingAgentNames() : [];
+  const scripts = await db.listScripts({ activeOnly: true });
 
   // Typed against a datalist: matches an existing account's name (case-
   // insensitive) and it's a real agent; anything else is saved as a label
@@ -219,6 +220,17 @@ export async function reviews(main, ctx) {
             Pick an existing account, or type a new name — it's saved as a label with no login and remembered here next time.
           </span>
         </label>` : ''}
+
+      <label class="field">
+        <span>Script</span>
+        <select id="script_id">
+          <option value="">— none / general —</option>
+          ${scripts.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}
+        </select>
+        <span class="muted" style="font-size:12px">
+          Grades the call against this specific talk-track, in addition to the rubric.${isAdmin ? ' Manage scripts under Admin.' : ''}
+        </span>
+      </label>
 
       <label class="field">
         <span>Audio file</span>
@@ -263,6 +275,7 @@ export async function reviews(main, ctx) {
       await db.createRecording({
         agent_id: agentId,
         agent_name: agentName,
+        script_id: val('script_id') || null,
         title: val('title'),
         call_on: val('call_on'),
         storage_path: storagePath,
@@ -394,6 +407,13 @@ export async function reviews(main, ctx) {
             <span>Agent on the call *</span>
             <input type="text" id="ed-agent" list="agent-datalist" required value="${esc(currentAgentName)}">
           </label>` : ''}
+        <label class="field">
+          <span>Script</span>
+          <select id="ed-script">
+            <option value="">— none / general —</option>
+            ${scripts.map(s => `<option value="${esc(s.id)}"${s.id === row.script_id ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}
+          </select>
+        </label>
         <div style="display:flex;gap:10px;margin-top:6px">
           <button class="btn btn--primary" type="submit" id="ed-save">Save changes</button>
           <button class="btn btn--ghost" type="button" id="ed-cancel">Cancel</button>
@@ -410,6 +430,7 @@ export async function reviews(main, ctx) {
       const patch = {
         title: editCard.querySelector('#ed-title').value.trim(),
         call_on: editCard.querySelector('#ed-call_on').value,
+        script_id: editCard.querySelector('#ed-script').value || null,
       };
 
       if (isAdmin) {
@@ -462,7 +483,8 @@ export async function reviewDetail(main, ctx, recordingId) {
         <div>
           <h1>${esc(rec.title || 'Untitled call')}</h1>
           <div class="page__sub">
-            ${esc(fmtDate(rec.call_on))} · ${esc(rec.agent?.full_name || rec.agent_name || '—')} · ${statusChipFor(rec.status)}
+            ${esc(fmtDate(rec.call_on))} · ${esc(rec.agent?.full_name || rec.agent_name || '—')}
+            ${rec.script?.name ? ` · Script: ${esc(rec.script.name)}` : ''} · ${statusChipFor(rec.status)}
           </div>
         </div>
         <a class="btn btn--ghost" href="#/reviews">Back</a>
@@ -1195,7 +1217,7 @@ function scoreHeaderHtml(score) {
     <div class="card">
       <div class="card__head">
         <h2>Summary</h2>
-        <span class="muted">${esc(score.model)} · rubric ${esc(score.rubric_version)}</span>
+        <span class="muted">${esc(score.model)} · rubric ${esc(score.rubric_version)}${score.script?.name ? ` · script: ${esc(score.script.name)}` : ''}</span>
       </div>
       <p style="margin:0">${esc(score.summary)}</p>
     </div>`;

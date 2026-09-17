@@ -6,7 +6,7 @@ import { toast, esc } from './ui.js';
 
 // Bump when debugging a stale-cache problem: if the browser doesn't show this
 // exact string, it is running old code and nothing else you observe is real.
-const BUILD = 'build-12';
+const BUILD = 'build-13';
 
 const el = id => document.getElementById(id);
 
@@ -64,6 +64,7 @@ const ROUTES = {
   '#/leaderboard':          { title: 'Leaderboard', render: scoringViews.agentLeaderboard, roles: ['agent', 'dialer', 'admin'] },
 
   '#/admin/agents':         { title: 'Agents',      render: adminViews.agents,      roles: ['admin'] },
+  '#/admin/scripts':        { title: 'Scripts',     render: adminViews.scripts,     roles: ['admin'] },
   '#/admin/scorecard':      { title: 'Scorecard',   render: scoringViews.scorecard, roles: ['admin'] },
   '#/admin/calibration':    { title: 'Calibration', render: scoringViews.calibration, roles: ['admin'] },
   '#/admin/reports':        { title: 'Reports',     render: adminViews.reports,     roles: ['admin'] },
@@ -101,7 +102,7 @@ function resolve(hash) {
 const NAV = [
   { section: 'Agent',    items: ['#/dashboard', '#/my-sales'] },
   { section: 'Coaching', items: ['#/reviews', '#/rubric', '#/leaderboard'] },
-  { section: 'Admin',    items: ['#/admin/agents', '#/admin/scorecard', '#/admin/calibration', '#/admin/reports'] },
+  { section: 'Admin',    items: ['#/admin/agents', '#/admin/scripts', '#/admin/scorecard', '#/admin/calibration', '#/admin/reports'] },
 ];
 
 const allowed = href => ROUTES[href].roles.includes(ctx.profile.role);

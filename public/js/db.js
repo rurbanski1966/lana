@@ -125,6 +125,46 @@ export async function createTeam(name) {
   return unwrap(await supabase.from('teams').insert({ name }).select().single());
 }
 
+/* --- scripts --------------------------------------------------------------
+   The talk-track an agent is supposed to follow, separate from the rubric
+   (which is how every call gets graded regardless of which script it was).
+   Readable by anyone signed in — anyone uploading a call needs the list for
+   the picker — but only admins can create, edit, or delete one (RLS).
+   -------------------------------------------------------------------------- */
+export async function listScripts({ activeOnly = false } = {}) {
+  await requireSession();
+  let q = supabase.from('scripts').select('id, name, active, created_at').order('name');
+  if (activeOnly) q = q.eq('active', true);
+  return unwrap(await q);
+}
+
+export async function getScript(id) {
+  await requireSession();
+  return unwrap(await supabase.from('scripts').select('*').eq('id', id).maybeSingle());
+}
+
+export async function createScript(name, content) {
+  const session = await requireSession();
+  return unwrap(
+    await supabase
+      .from('scripts')
+      .insert({ name, content, created_by: session.user.id })
+      .select()
+      .single()
+  );
+}
+
+export async function updateScript(id, patch) {
+  await requireSession();
+  return unwrap(await supabase.from('scripts').update(patch).eq('id', id).select().single());
+}
+
+export async function deleteScript(id) {
+  await requireSession();
+  const { error } = await supabase.from('scripts').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
 /* --- submissions --------------------------------------------------------- */
 const SUBMISSION_COLS =
   'id, agent_id, category, client_name, policy_number, carrier, ap_amount, ' +
@@ -198,8 +238,8 @@ export async function adminReport(start, end) {
 /* --- call scoring -------------------------------------------------------- */
 const RECORDING_COLS =
   'id, agent_id, agent_name, uploaded_by, title, call_on, duration_seconds, storage_path, ' +
-  'transcript_source, status, error_message, created_at, ' +
-  'agent:profiles!call_recordings_agent_id_fkey(full_name)';
+  'transcript_source, status, error_message, created_at, script_id, ' +
+  'agent:profiles!call_recordings_agent_id_fkey(full_name), script:scripts(name)';
 
 // Deliberately omits `transcript`. A list of 50 calls would otherwise pull
 // 50 full transcripts over the wire to render 50 table rows.
@@ -247,6 +287,7 @@ export async function createRecording(input) {
         agent_name: input.agent_id ? null : (input.agent_name?.trim() || null),
         uploaded_by: session.user.id,
         appointment_id: input.appointment_id || null,
+        script_id: input.script_id || null,
         title: input.title || '',
         call_on: input.call_on,
         duration_seconds: input.duration_seconds ?? null,
@@ -325,7 +366,7 @@ export async function scoreForRecording(recordingId) {
   return unwrap(
     await supabase
       .from('call_scores')
-      .select('*, overridden_by_profile:profiles!call_scores_overridden_by_fkey(full_name)')
+      .select('*, overridden_by_profile:profiles!call_scores_overridden_by_fkey(full_name), script:scripts(name)')
       .eq('recording_id', recordingId)
       .order('created_at', { ascending: false })
       .limit(1)

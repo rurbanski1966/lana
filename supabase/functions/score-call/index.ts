@@ -173,9 +173,9 @@ Deno.serve(async req => {
   const recordingId = (body.recording_id ?? record?.id) as string | undefined;
   if (!recordingId) return json({ error: 'recording_id is required' }, 400);
 
-  const COLS = 'id, agent_id, transcript, status, title, call_on, duration_seconds';
+  const COLS = 'id, agent_id, transcript, status, title, call_on, duration_seconds, script_id';
   let rec: {
-    id: string; agent_id: string; transcript: string | null; status: string;
+    id: string; agent_id: string; transcript: string | null; status: string; script_id: string | null;
   } | null;
 
   if (isWebhook) {
@@ -253,6 +253,27 @@ Deno.serve(async req => {
     const systemPrompt = buildSystemPrompt(rubric);
     const outputSchema = buildOutputSchema(rubric);
 
+    // The script is per-call, like the transcript — it goes in the user
+    // message, never the cached system block, or every script would fork the
+    // prompt cache and the rubric would never be read from it again.
+    let script: { name: string; content: string } | null = null;
+    if (rec.script_id) {
+      const { data } = await serviceClient
+        .from('scripts')
+        .select('name, content')
+        .eq('id', rec.script_id)
+        .maybeSingle();
+      script = data;
+    }
+    const scriptBlock = script?.content?.trim()
+      ? `\n\nThe agent was expected to follow this specific script on this call. Judge how closely ` +
+        `they followed it — required points covered, order, disclosures, and language — and factor ` +
+        `adherence into your dimension scores (particularly Presentation) and into the summary and ` +
+        `coaching_focus. A good-faith adaptation that still hits the script's substance is not itself ` +
+        `a violation; skipping a required point or disclosure is.` +
+        `\n\n<script name="${script!.name.replace(/"/g, "'")}">\n${script!.content.trim()}\n</script>`
+      : '';
+
     const anthropic = new Anthropic({ apiKey: Deno.env.get('ANTHROPIC_API_KEY')! });
 
     // Prompt cache layout. Render order is tools -> system -> messages, so the
@@ -284,6 +305,7 @@ Deno.serve(async req => {
           role: 'user',
           content:
             `Score this sales call.${truncated ? '\n\nNOTE: the transcript was truncated for length; score only what is present and say so in the summary.' : ''}` +
+            scriptBlock +
             `\n\n<transcript>\n${transcript}\n</transcript>`,
         },
       ],
@@ -351,6 +373,7 @@ Deno.serve(async req => {
       .insert({
         recording_id: rec.id,
         agent_id: rec.agent_id,
+        script_id: rec.script_id,
         overall_score: clamp(parsed.overall_score),
         dimensions,
         compliance_passed: compliancePassed,
