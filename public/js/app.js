@@ -6,7 +6,7 @@ import { toast, esc } from './ui.js';
 
 // Bump when debugging a stale-cache problem: if the browser doesn't show this
 // exact string, it is running old code and nothing else you observe is real.
-const BUILD = 'build-19';
+const BUILD = 'build-20';
 
 const el = id => document.getElementById(id);
 

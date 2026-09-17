@@ -41,10 +41,8 @@ export async function dashboard(main, ctx) {
     : 'Month has not started';
 
   let targetNote = 'No monthly target set';
-  let meter = null;
   if (target > 0) {
     const pct = (monthAp / target) * 100;
-    meter = { pct, aria: `${Math.round(pct)}% of ${fmtMoney(target)} target` };
     const gap = target - monthAp;
     targetNote = gap > 0
       ? `${fmtMoney(gap)} to go · ${Math.round(pct)}% of ${fmtMoney(target)}`
@@ -54,11 +52,7 @@ export async function dashboard(main, ctx) {
   document.getElementById('kpis').outerHTML = `
     <div class="kpis" id="kpis">
       ${statTile({ label: 'Daily spend', value: fmtMoneyExact(m.daily_spend), note: "AI grading cost, today's calls" })}
-      ${statTile({
-        label: 'Month AP', value: fmtMoney(monthAp),
-        note: `${fmtNum(m.month_count)} submission${Number(m.month_count) === 1 ? '' : 's'}`,
-        meter,
-      })}
+      ${statTile({ label: 'Weekly spend', value: fmtMoneyExact(m.weekly_spend), note: 'AI grading cost, Monday–Sunday' })}
       ${statTile({ label: 'Pace', value: fmtMoney(pace), note: paceNote })}
       ${statTile({ label: 'To target', value: target > 0 ? fmtMoney(Math.max(0, target - monthAp)) : '—', note: targetNote })}
     </div>`;
