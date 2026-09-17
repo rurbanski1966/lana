@@ -53,7 +53,7 @@ export async function dashboard(main, ctx) {
 
   document.getElementById('kpis').outerHTML = `
     <div class="kpis" id="kpis">
-      ${statTile({ label: 'Daily AP', value: fmtMoney(m.daily_ap), note: 'Submitted today' })}
+      ${statTile({ label: 'Daily spend', value: fmtMoneyExact(m.daily_spend), note: "AI grading cost, today's calls" })}
       ${statTile({
         label: 'Month AP', value: fmtMoney(monthAp),
         note: `${fmtNum(m.month_count)} submission${Number(m.month_count) === 1 ? '' : 's'}`,
