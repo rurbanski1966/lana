@@ -500,7 +500,8 @@ export async function reviewDetail(main, ctx, recordingId) {
           </form>` : ''}
       </div>
 
-      <div id="score-area">${score ? scoreHtml(score, turns, ctx.profile.role === 'admin') : ''}</div>
+      <div id="score-area">${score ? scoreHtml(score, turns) : ''}</div>
+      <div id="findings-area">${score ? spinner() : ''}</div>
       <div id="override-area">${score && ctx.profile.role === 'admin' ? spinner() : ''}</div>
       <div id="review-area">${score ? spinner() : ''}</div>
 
@@ -523,16 +524,9 @@ export async function reviewDetail(main, ctx, recordingId) {
         </div>` : ''}`;
 
     document.getElementById('reload').addEventListener('click', draw);
+    if (score) drawFindings(score, ctx, turns, draw);
     if (score && ctx.profile.role === 'admin') drawOverride(score, draw);
     if (score) drawReview(score);
-
-    // "Manual review" in the Compliance findings header is a shortcut into
-    // the Manual override card below, not a separate system — jump there and
-    // open it straight to the edit form.
-    document.getElementById('jump-override')?.addEventListener('click', () => {
-      document.getElementById('override-area')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      document.getElementById('ov-edit')?.click();
-    });
 
     document.getElementById('play')?.addEventListener('click', async e => {
       e.target.disabled = true;
@@ -649,28 +643,141 @@ export async function reviewDetail(main, ctx, recordingId) {
   await draw();
 }
 
-/* --- manual override ------------------------------------------------------
-   The one admin-made call that's authoritative for a score. Editing starts
-   from the model's own numbers so an admin only has to change what's
-   actually wrong — re-typing everything to agree with the model would be
-   friction with no purpose. Separate from score_reviews below, which never
-   overrides anything on its own.
+/* --- compliance findings: per-finding manual review ------------------------
+   Each finding gets its own Manual review button rather than one shared
+   form — a reviewer is usually correcting one specific call, not re-grading
+   every finding at once. Editing turns a finding into a 0-100 score
+   (0 = most severe, 100 = no issue); severity is DERIVED from that number,
+   never chosen separately, so the two can't disagree. Saving recomputes the
+   whole call's overall score and compliance verdict from every surviving
+   finding's severity plus the current dimension scores — see
+   recomputeFromFindings() — so a finding you just fixed immediately changes
+   the grade everywhere it's read, not just this table.
    -------------------------------------------------------------------------- */
-function overrideFindingRow(f, idx) {
-  return `<div class="rrow" data-idx="${idx}">
-    <div style="flex:1;min-width:180px">
-      <strong>${esc(FINDING_CODES[f.code] || f.code)}</strong>
-      <div class="muted" style="font-size:12px">${esc(f.detail || '')}</div>
-    </div>
-    <select data-f="severity">
-      ${FINDING_SEVERITIES.map(s => `<option value="${s.value}"${s.value === f.severity ? ' selected' : ''}>${s.label}</option>`).join('')}
-    </select>
-    <label style="display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap">
-      <input type="checkbox" data-f="dismissed"${f.dismissed ? ' checked' : ''}> Dismiss
-    </label>
-  </div>`;
+async function drawFindings(score, ctx, turns, onSaved) {
+  const host = document.getElementById('findings-area');
+  if (!host) return;
+  const isAdmin = ctx.profile.role === 'admin';
+
+  const eff = effectiveOf(score);
+  // Editing always starts from whatever is currently authoritative — the
+  // last override if there is one, otherwise the model's own findings.
+  const findings = (score.manual_findings ?? score.findings ?? []).map(f => ({ ...f }));
+
+  let editingIdx = null;
+  render();
+
+  function render() {
+    host.innerHTML = `
+      <div class="card">
+        <div class="card__head">
+          <h2>Compliance findings</h2>
+          <span class="muted">${eff.compliance_passed ? 'Passed' : 'Needs attention'}</span>
+        </div>
+        ${findings.length === 0 ? empty('No compliance issues found.') : `
+          <div class="tablewrap"><table>
+            <thead><tr><th>Issue</th><th>Severity</th><th>Detail</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
+            <tbody>${findings.map((f, i) => i === editingIdx ? editRowHtml(f, i) : viewRowHtml(f, i)).join('')}</tbody>
+          </table></div>`}
+      </div>`;
+    wire();
+  }
+
+  function viewRowHtml(f, i) {
+    return `
+      <tr>
+        <td>${esc(FINDING_CODES[f.code] || f.code)}</td>
+        <td>${severityChip(f.severity)}</td>
+        <td>${esc(f.detail || '')}
+          ${evidenceHtml(f.evidence, turns, { inline: true })}
+          ${f.reason ? `<br><span class="muted" style="font-size:12px">Reviewer note: ${esc(f.reason)}</span>` : ''}</td>
+        ${isAdmin ? `<td><button class="btn btn--ghost btn--sm" data-review="${i}" type="button">Manual review</button></td>` : ''}
+      </tr>`;
+  }
+
+  function editRowHtml(f, i) {
+    const current = f.manual_score ?? severityToScore(f.severity);
+    return `
+      <tr>
+        <td colspan="4">
+          <div style="display:flex;flex-direction:column;gap:10px;padding:6px 0">
+            <div><strong>${esc(FINDING_CODES[f.code] || f.code)}</strong> — currently ${severityChip(f.severity)}</div>
+            <div class="muted" style="font-size:13px">${esc(f.detail || '')}</div>
+            <div class="grid-2">
+              <label class="field">
+                <span>Corrected score * <span class="muted">(0 = most severe, 100 = no issue)</span></span>
+                <input type="number" min="0" max="100" required id="fr-score" value="${esc(current)}">
+              </label>
+              <label class="field">
+                <span>New severity</span>
+                <input type="text" id="fr-preview" disabled value="${scoreToSeverity(current)}">
+              </label>
+            </div>
+            <label class="field">
+              <span>Explanation *</span>
+              <textarea id="fr-reason" rows="2" required placeholder="Why this finding was re-graded">${esc(f.reason || '')}</textarea>
+            </label>
+            <div style="display:flex;gap:10px">
+              <button class="btn btn--primary" type="button" data-save="${i}">Save</button>
+              <button class="btn btn--ghost" type="button" data-cancel>Cancel</button>
+            </div>
+          </div>
+        </td>
+      </tr>`;
+  }
+
+  function wire() {
+    host.querySelectorAll('[data-review]').forEach(btn => {
+      btn.addEventListener('click', () => { editingIdx = Number(btn.dataset.review); render(); });
+    });
+    host.querySelector('[data-cancel]')?.addEventListener('click', () => { editingIdx = null; render(); });
+
+    const scoreInput = host.querySelector('#fr-score');
+    scoreInput?.addEventListener('input', () => {
+      const n = Number(scoreInput.value);
+      host.querySelector('#fr-preview').value = Number.isFinite(n) ? scoreToSeverity(n) : '—';
+    });
+
+    host.querySelector('[data-save]')?.addEventListener('click', async btnEvent => {
+      const btn = btnEvent.currentTarget;
+      const i = Number(btn.dataset.save);
+      const n = Number(host.querySelector('#fr-score').value);
+      const reason = host.querySelector('#fr-reason').value.trim();
+
+      if (!Number.isFinite(n) || n < 0 || n > 100) return toast('Enter a score between 0 and 100.', 'error');
+      if (!reason) return toast('Add an explanation for the change.', 'error');
+
+      const updated = findings.map((f, idx) => idx === i
+        ? { ...f, manual_score: n, severity: scoreToSeverity(n), reason }
+        : f);
+      const { overallScore, compliancePassed } = recomputeFromFindings(eff.dimensions, updated);
+
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        await db.saveScoreOverride(score.id, {
+          overall_score: overallScore,
+          dimensions: eff.dimensions,
+          compliance_passed: compliancePassed,
+          findings: updated,
+          notes: score.manual_notes || '',
+        });
+        toast('Finding updated.', 'ok');
+        onSaved();
+      } catch (err) {
+        toast(err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Save';
+      }
+    });
+  }
 }
 
+// Overall score and the compliance verdict are never typed directly here —
+// recomputeFromFindings() derives both from dimension scores plus whatever
+// findings currently stand, the same formula drawFindings() uses when a
+// single finding is re-graded. Typing an overall number here and a severity
+// there could disagree; deriving one from the other can't.
 async function drawOverride(score, onSaved) {
   const host = document.getElementById('override-area');
   if (!host) return;
@@ -687,19 +794,19 @@ async function drawOverride(score, onSaved) {
     return `
       <div class="card">
         <div class="card__head">
-          <h2>Manual override</h2>
+          <h2>Dimension scores</h2>
           ${score.is_overridden
-            ? `<span class="chip chip--warning"><span aria-hidden="true">!</span>Active</span>`
+            ? `<span class="chip chip--warning"><span aria-hidden="true">!</span>Overridden</span>`
             : `<span class="muted">Not overridden</span>`}
         </div>
         <p class="muted" style="margin:0 0 14px">
           ${score.is_overridden
             ? (score.manual_notes ? esc(score.manual_notes) : 'No note left for this override.')
-            : "The model's score stands. Override it if a reviewer disagrees — the model's own numbers stay visible, this just decides which one counts."}
+            : "Adjust a dimension if the model scored it wrong — the overall score and compliance verdict recompute from these plus the compliance findings, so there's nothing else to set here."}
         </p>
         <div style="display:flex;gap:10px">
           <button class="btn ${score.is_overridden ? '' : 'btn--primary'}" type="button" id="ov-edit">
-            ${score.is_overridden ? 'Edit override' : 'Override this score'}
+            ${score.is_overridden ? 'Edit dimensions' : 'Override dimension scores'}
           </button>
           ${score.is_overridden ? `<button class="btn btn--ghost" type="button" id="ov-clear">Revert to model score</button>` : ''}
         </div>
@@ -709,29 +816,18 @@ async function drawOverride(score, onSaved) {
   function editorHtml() {
     const modelDims = entriesOf(score.dimensions);
     const manualDims = score.manual_dimensions ?? score.dimensions ?? {};
-    const findings = (score.manual_findings ?? score.findings ?? []).map(f => ({ dismissed: false, ...f }));
-    const complianceNow = score.is_overridden ? score.manual_compliance_passed : score.compliance_passed;
+    const currentFindings = score.manual_findings ?? score.findings ?? [];
+    const preview = recomputeFromFindings(manualDims, currentFindings);
 
     return `
       <div class="card">
-        <div class="card__head"><h2>Override this score</h2></div>
+        <div class="card__head"><h2>Override dimension scores</h2></div>
         <form id="override-form">
-          <div class="grid-2">
-            <label class="field">
-              <span>Overall score * <span class="muted">(model said ${score.overall_score})</span></span>
-              <input type="number" id="ov-overall" min="0" max="100" required
-                     value="${esc(score.is_overridden ? score.manual_overall_score : score.overall_score)}">
-            </label>
-            <label class="field">
-              <span>Compliance verdict</span>
-              <select id="ov-compliance">
-                <option value="true"${complianceNow ? ' selected' : ''}>Pass</option>
-                <option value="false"${!complianceNow ? ' selected' : ''}>Fail</option>
-              </select>
-            </label>
+          <div class="grid-2" id="ov-preview" style="margin-bottom:6px">
+            <div class="field"><span class="muted">Overall score (computed)</span><strong id="ov-overall-preview">${preview.overallScore}</strong></div>
+            <div class="field"><span class="muted">Compliance (computed)</span><strong id="ov-compliance-preview">${preview.compliancePassed ? 'Pass' : 'Fail'}</strong></div>
           </div>
 
-          <h3 style="margin:18px 0 8px">By dimension</h3>
           <div class="grid-2" id="ov-dims">
             ${modelDims.map(([key, v]) => `
               <label class="field" data-dim="${esc(key)}">
@@ -740,13 +836,6 @@ async function drawOverride(score, onSaved) {
                        value="${esc(manualDims?.[key]?.score ?? v.score ?? 0)}">
               </label>`).join('')}
           </div>
-
-          ${findings.length ? `
-            <h3 style="margin:18px 0 8px">Compliance findings</h3>
-            <p class="muted" style="margin:0 0 10px;font-size:12px">
-              Re-grade severity or dismiss a finding the model got wrong — the code, detail and evidence stay as scored.
-            </p>
-            <div id="ov-findings">${findings.map(overrideFindingRow).join('')}</div>` : ''}
 
           <label class="field" style="margin-top:18px">
             <span>Note <span class="muted">(why this was changed)</span></span>
@@ -759,6 +848,17 @@ async function drawOverride(score, onSaved) {
           </div>
         </form>
       </div>`;
+  }
+
+  function currentDimensions() {
+    const dimensions = {};
+    host.querySelectorAll('#ov-dims [data-dim]').forEach(row => {
+      const key = row.dataset.dim;
+      const n = Number(row.querySelector('[data-f="score"]').value);
+      const modelEntry = score.dimensions?.[key] ?? {};
+      dimensions[key] = { ...modelEntry, score: Number.isFinite(n) ? n : modelEntry.score };
+    });
+    return dimensions;
   }
 
   function wire() {
@@ -774,41 +874,33 @@ async function drawOverride(score, onSaved) {
       } catch (err) { toast(err.message, 'error'); }
     });
 
+    // Live preview: typing a dimension score updates the computed overall
+    // score/compliance immediately, before Save is even clicked.
+    host.querySelectorAll('#ov-dims [data-f="score"]').forEach(input => {
+      input.addEventListener('input', () => {
+        const currentFindings = score.manual_findings ?? score.findings ?? [];
+        const preview = recomputeFromFindings(currentDimensions(), currentFindings);
+        host.querySelector('#ov-overall-preview').textContent = preview.overallScore;
+        host.querySelector('#ov-compliance-preview').textContent = preview.compliancePassed ? 'Pass' : 'Fail';
+      });
+    });
+
     document.getElementById('override-form')?.addEventListener('submit', async e => {
       e.preventDefault();
       const btn = document.getElementById('ov-save');
 
-      const overall = Number(document.getElementById('ov-overall').value);
-      if (!Number.isFinite(overall) || overall < 0 || overall > 100) {
-        return toast('Enter a valid overall score (0-100).', 'error');
-      }
-
-      const dimensions = {};
-      document.querySelectorAll('#ov-dims [data-dim]').forEach(row => {
-        const key = row.dataset.dim;
-        const n = Number(row.querySelector('[data-f="score"]').value);
-        const modelEntry = score.dimensions?.[key] ?? {};
-        dimensions[key] = { ...modelEntry, score: Number.isFinite(n) ? n : modelEntry.score };
-      });
-
-      const baseFindings = score.manual_findings ?? score.findings ?? [];
-      const findings = [...document.querySelectorAll('#ov-findings [data-idx]')].map(row => {
-        const idx = Number(row.dataset.idx);
-        return {
-          ...baseFindings[idx],
-          severity: row.querySelector('[data-f="severity"]').value,
-          dismissed: row.querySelector('[data-f="dismissed"]').checked,
-        };
-      });
+      const dimensions = currentDimensions();
+      const currentFindings = score.manual_findings ?? score.findings ?? [];
+      const { overallScore, compliancePassed } = recomputeFromFindings(dimensions, currentFindings);
 
       btn.disabled = true;
       btn.textContent = 'Saving…';
       try {
         await db.saveScoreOverride(score.id, {
-          overall_score: overall,
+          overall_score: overallScore,
           dimensions,
-          compliance_passed: document.getElementById('ov-compliance').value === 'true',
-          findings,
+          compliance_passed: compliancePassed,
+          findings: currentFindings,
           notes: document.getElementById('ov-notes').value.trim(),
         });
         toast('Override saved.', 'ok');
@@ -967,6 +1059,43 @@ function effectiveOf(score) {
   };
 }
 
+/* --- finding score <-> severity ------------------------------------------
+   A finding never had a number, only a severity — the rubric assigns one
+   directly. A manual re-grade puts a number in (0 = most severe, 100 = no
+   issue) and severity is derived from it, per Ryan 2026-09-17, so the two
+   can never drift apart the way a separate severity dropdown could.
+   -------------------------------------------------------------------------- */
+const scoreToSeverity = n =>
+  n <= 39 ? 'critical' : n <= 59 ? 'high' : n <= 79 ? 'medium' : 'low';
+
+// Starting point when a finding has no manual score yet — the midpoint of
+// its current severity's band, so the input opens already agreeing with
+// what the AI decided rather than an arbitrary number.
+const severityToScore = sev => ({ critical: 20, high: 50, medium: 70, low: 90 }[sev] ?? 70);
+
+const SEVERITY_RANK = { critical: 3, high: 2, medium: 1, low: 0 };
+
+// Per Ryan 2026-09-17: overall score starts from the dimension average, then
+// gets capped by the worst surviving finding — a Critical finding can never
+// let the call read better than "critical" overall, High never better than
+// "serious", matching the tone bands used everywhere else in the app
+// (scoreTone: <40 critical, 40-59 serious). Compliance passes only when
+// nothing High or Critical survived — same rule the rubric itself uses.
+function recomputeFromFindings(dimensions, findings) {
+  const dims = entriesOf(dimensions).map(([, v]) => Number(v.score) || 0);
+  const dimensionAvg = dims.length ? Math.round(dims.reduce((a, b) => a + b, 0) / dims.length) : 0;
+
+  const worst = findings
+    .filter(f => !f.dismissed)
+    .reduce((acc, f) => (SEVERITY_RANK[f.severity] > SEVERITY_RANK[acc] ? f.severity : acc), 'low');
+
+  const cap = worst === 'critical' ? 39 : worst === 'high' ? 59 : 100;
+  return {
+    overallScore: Math.min(dimensionAvg, cap),
+    compliancePassed: worst !== 'critical' && worst !== 'high',
+  };
+}
+
 // Wraps an evidence quote so a click scrolls the transcript to the matching
 // line and seeks the audio there — but only when a match was actually found;
 // an unmatched quote (paraphrased, or from a manually pasted transcript with
@@ -981,7 +1110,7 @@ function evidenceHtml(text, turns, { inline = false } = {}) {
     : `<blockquote class="evidence${jumpClass}" style="margin:0;padding-left:12px;border-left:2px solid var(--grid);font-size:13px"${jumpAttrs}>${esc(text)}</blockquote>`;
 }
 
-function scoreHtml(score, turns = [], isAdmin = false) {
+function scoreHtml(score, turns = []) {
   const eff = effectiveOf(score);
   const strengths = Array.isArray(score.strengths) ? score.strengths : [];
   const improvements = Array.isArray(score.improvements) ? score.improvements : [];
@@ -1062,32 +1191,6 @@ function scoreHtml(score, turns = [], isAdmin = false) {
               </div>`).join('')}
         </div>
       </details>
-    </div>
-
-    <div class="card">
-      <div class="card__head">
-        <h2>Compliance findings</h2>
-        <div style="display:flex;align-items:baseline;gap:12px">
-          <span class="muted">${eff.compliance_passed ? 'Passed' : 'Needs attention'}</span>
-          ${isAdmin ? `<button class="btn btn--ghost btn--sm" id="jump-override" type="button">Manual review</button>` : ''}
-        </div>
-      </div>
-      ${visibleFindings.length === 0 ? empty('No compliance issues found.') : `
-        <div class="tablewrap"><table>
-          <thead><tr><th>Issue</th><th>Severity</th><th>Detail</th></tr></thead>
-          <tbody>${visibleFindings.map(f => `
-            <tr>
-              <td>${esc(FINDING_CODES[f.code] || f.code)}</td>
-              <td>${severityChip(f.severity)}</td>
-              <td>${esc(f.detail || '')}
-                ${evidenceHtml(f.evidence, turns, { inline: true })}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table></div>`}
-      ${score.is_overridden && eff.findings.some(f => f.dismissed)
-        ? `<p class="muted" style="font-size:12px;margin:10px 0 0">
-             ${fmtNum(eff.findings.filter(f => f.dismissed).length)} finding${eff.findings.filter(f => f.dismissed).length === 1 ? '' : 's'} dismissed on override.
-           </p>` : ''}
     </div>
 
     <div class="card">
