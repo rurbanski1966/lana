@@ -1135,6 +1135,115 @@ export async function calibration(main) {
   await draw();
 }
 
+/* === Agent leaderboard (by call score) ====================================
+   Ranks every scored agent by average call score, highest first — the same
+   number the Scorecard shows, just framed for a quick team-accountability
+   view instead of a spend/compliance rollup. Tabs filter by team; "All
+   agents" is the scoring_leaderboard RPC's own order, since it already ranks
+   across every team combined.
+   -------------------------------------------------------------------------- */
+const scoreLevel = score => {
+  const n = Number(score) || 0;
+  return n >= 80 ? 'good' : n >= 70 ? 'warning' : 'critical';
+};
+
+const scoreLevelChip = level => {
+  const meta = {
+    good:     { label: 'Good',         icon: '✓' },
+    warning:  { label: 'Needs review', icon: '!' },
+    critical: { label: 'Critical',     icon: '✕' },
+  }[level];
+  return `<span class="chip chip--${level}"><span aria-hidden="true">${meta.icon}</span>${meta.label}</span>`;
+};
+
+export async function agentLeaderboard(main) {
+  main.innerHTML = `
+    <div class="page__head"><div>
+      <h1>Leaderboard</h1>
+      <div class="page__sub">Average call score, ranked highest to lowest</div>
+    </div></div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card__head"><h2>What the colors mean</h2></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div>${scoreLevelChip('critical')} <span class="muted">0–69% average — needs immediate coaching and a performance review.</span></div>
+        <div>${scoreLevelChip('warning')} <span class="muted">70–79% average — needs agent review.</span></div>
+        <div>${scoreLevelChip('good')} <span class="muted">80% or higher — good to go, no coaching needed.</span></div>
+      </div>
+    </div>
+    <div class="filters">${selectField('alb-range', 'Period', RANGES, 'month')}</div>
+    <div id="alb-tabs" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"></div>
+    <div class="card" id="alb-body">${spinner()}</div>`;
+
+  const rangeSel = document.getElementById('alb-range');
+  const tabsHost = document.getElementById('alb-tabs');
+  const body = document.getElementById('alb-body');
+
+  const teams = await db.listTeams();
+  let activeTab = 'all';
+
+  function renderTabs() {
+    const tabs = [{ key: 'all', label: 'All agents' }, ...teams.map(t => ({ key: t.name, label: t.name }))];
+    tabsHost.innerHTML = tabs.map(t =>
+      `<button type="button" class="btn ${t.key === activeTab ? 'btn--primary' : 'btn--ghost'}" data-tab="${esc(t.key)}">${esc(t.label)}</button>`
+    ).join('');
+    tabsHost.querySelectorAll('[data-tab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeTab = btn.dataset.tab;
+        renderTabs();
+        draw();
+      });
+    });
+  }
+
+  async function draw() {
+    body.innerHTML = spinner();
+    const { start, end } = range(rangeSel.value);
+    const rows = await db.scoringLeaderboard(start, end);
+    const filtered = activeTab === 'all' ? rows : rows.filter(r => r.team_name === activeTab);
+
+    if (filtered.length === 0) {
+      body.innerHTML = empty('No scored calls in this period.');
+      return;
+    }
+
+    // Re-rank within the filtered set — a team tab should read 1..N for that
+    // team, not carry the gaps left by agents on other teams.
+    const ranked = filtered
+      .slice()
+      .sort((a, b) => Number(b.avg_score) - Number(a.avg_score))
+      .map((r, i) => ({ ...r, displayRank: i + 1 }));
+
+    body.innerHTML = `
+      <div class="card__head">
+        <h2>${fmtNum(ranked.length)} agent${ranked.length === 1 ? '' : 's'}</h2>
+        <span class="muted">${esc(fmtDate(start))} – ${esc(fmtDate(end))}</span>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr>
+          <th>Rank</th><th>Agent</th><th>Team</th>
+          <th class="num">Calls scored</th><th class="num">Avg score</th><th></th>
+        </tr></thead>
+        <tbody>${ranked.map(r => {
+          const level = scoreLevel(r.avg_score);
+          return `
+            <tr class="lb-row--${level}">
+              <td class="tnum">${r.displayRank}</td>
+              <td>${esc(r.full_name)}</td>
+              <td class="muted">${esc(r.team_name)}</td>
+              <td class="num">${esc(fmtNum(r.calls_scored))}</td>
+              <td class="num tnum"><strong>${esc(r.avg_score ?? 0)}</strong></td>
+              <td>${scoreLevelChip(level)}</td>
+            </tr>`;
+        }).join('')}
+        </tbody>
+      </table></div>`;
+  }
+
+  rangeSel.addEventListener('change', draw);
+  renderTabs();
+  await draw();
+}
+
 /* === Admin scorecard ====================================================== */
 export async function scorecard(main) {
   main.innerHTML = `

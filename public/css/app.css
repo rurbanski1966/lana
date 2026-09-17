@@ -430,6 +430,12 @@ code {
 /* --- Tables -------------------------------------------------------------- */
 .tablewrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
+
+/* Agent leaderboard row tint — a scan-at-a-glance signal, always paired with
+   the chip's icon + word so the level never rides on color alone. */
+tr.lb-row--good     { background: color-mix(in srgb, var(--good) 12%, transparent); }
+tr.lb-row--warning  { background: color-mix(in srgb, var(--warning) 15%, transparent); }
+tr.lb-row--critical { background: color-mix(in srgb, var(--critical) 15%, transparent); }
 th {
   text-align: left;
   font-weight: 500;

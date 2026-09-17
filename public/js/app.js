@@ -6,7 +6,7 @@ import { toast, esc } from './ui.js';
 
 // Bump when debugging a stale-cache problem: if the browser doesn't show this
 // exact string, it is running old code and nothing else you observe is real.
-const BUILD = 'build-5';
+const BUILD = 'build-6';
 
 const el = id => document.getElementById(id);
 
@@ -61,6 +61,7 @@ const ROUTES = {
   // Readable by everyone on purpose — people graded against a standard should
   // be able to see it. Editing is gated inside the view.
   '#/rubric':               { title: 'Scoring rubric', render: rubricViews.rubric, roles: ['agent', 'dialer', 'admin'] },
+  '#/leaderboard':          { title: 'Leaderboard', render: scoringViews.agentLeaderboard, roles: ['agent', 'dialer', 'admin'] },
 
   '#/admin/agents':         { title: 'Agents',      render: adminViews.agents,      roles: ['admin'] },
   '#/admin/scorecard':      { title: 'Scorecard',   render: scoringViews.scorecard, roles: ['admin'] },
@@ -99,7 +100,7 @@ function resolve(hash) {
 
 const NAV = [
   { section: 'Agent',    items: ['#/dashboard', '#/my-sales'] },
-  { section: 'Coaching', items: ['#/reviews', '#/rubric'] },
+  { section: 'Coaching', items: ['#/reviews', '#/rubric', '#/leaderboard'] },
   { section: 'Admin',    items: ['#/admin/agents', '#/admin/scorecard', '#/admin/calibration', '#/admin/reports'] },
 ];
 
