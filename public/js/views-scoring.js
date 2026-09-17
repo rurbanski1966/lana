@@ -500,9 +500,11 @@ export async function reviewDetail(main, ctx, recordingId) {
           </form>` : ''}
       </div>
 
-      <div id="score-area">${score ? scoreHtml(score, turns) : ''}</div>
-      <div id="findings-area">${score ? spinner() : ''}</div>
+      <div id="score-header">${score ? scoreHeaderHtml(score) : ''}</div>
       <div id="override-area">${score && ctx.profile.role === 'admin' ? spinner() : ''}</div>
+      <div id="dimensions-area">${score ? spinner() : ''}</div>
+      <div id="findings-area">${score ? spinner() : ''}</div>
+      <div id="score-footer">${score ? scoreFooterHtml(score) : ''}</div>
       <div id="review-area">${score ? spinner() : ''}</div>
 
       ${rec.transcript ? `
@@ -524,8 +526,9 @@ export async function reviewDetail(main, ctx, recordingId) {
         </div>` : ''}`;
 
     document.getElementById('reload').addEventListener('click', draw);
-    if (score) drawFindings(score, ctx, turns, draw);
     if (score && ctx.profile.role === 'admin') drawOverride(score, draw);
+    if (score) drawDimensions(score, ctx, turns, draw);
+    if (score) drawFindings(score, ctx, turns, draw);
     if (score) drawReview(score);
 
     document.getElementById('play')?.addEventListener('click', async e => {
@@ -571,7 +574,7 @@ export async function reviewDetail(main, ctx, recordingId) {
     // Clicking a coaching evidence quote scrolls to the transcript line it
     // matched and seeks the audio there — the quote is what the model says
     // proves the score, so verifying it in context is the whole point.
-    document.getElementById('score-area')?.addEventListener('click', e => {
+    const onQuoteClick = e => {
       const jumpEl = e.target.closest('[data-turn]');
       if (!jumpEl) return;
       const turnEl = document.getElementById(`turn-${jumpEl.dataset.turn}`);
@@ -581,7 +584,12 @@ export async function reviewDetail(main, ctx, recordingId) {
         setTimeout(() => turnEl.classList.remove('turn--flash'), 1500);
         if (turnEl.dataset.start !== undefined) ensureAudioAndSeek(Number(turnEl.dataset.start));
       }
-    });
+    };
+    // Both areas get their own DOM subtree recreated on every redraw (by
+    // drawDimensions/drawFindings), unlike `main` itself — attaching here
+    // instead of higher up avoids piling up a duplicate listener each time.
+    document.getElementById('dimensions-area')?.addEventListener('click', onQuoteClick);
+    document.getElementById('findings-area')?.addEventListener('click', onQuoteClick);
 
     document.getElementById('transcribe')?.addEventListener('click', async e => {
       e.target.disabled = true;
@@ -773,145 +781,170 @@ async function drawFindings(score, ctx, turns, onSaved) {
   }
 }
 
-// Overall score and the compliance verdict are never typed directly here —
-// recomputeFromFindings() derives both from dimension scores plus whatever
-// findings currently stand, the same formula drawFindings() uses when a
-// single finding is re-graded. Typing an overall number here and a severity
-// there could disagree; deriving one from the other can't.
-async function drawOverride(score, onSaved) {
-  const host = document.getElementById('override-area');
+/* --- by dimension: per-dimension manual review -----------------------------
+   Mirrors drawFindings() one card up — each dimension gets its own Manual
+   review button instead of one shared form, for the same reason: a reviewer
+   is usually correcting one thing they noticed, not re-grading the whole
+   call. Saving recomputes the overall score and compliance verdict the same
+   way a finding edit does — see recomputeFromFindings().
+   -------------------------------------------------------------------------- */
+async function drawDimensions(score, ctx, turns, onSaved) {
+  const host = document.getElementById('dimensions-area');
   if (!host) return;
+  const isAdmin = ctx.profile.role === 'admin';
 
-  let editing = false;
+  const eff = effectiveOf(score);
+  const dims = entriesOf(eff.dimensions);
+
+  let editingKey = null;
   render();
 
   function render() {
-    host.innerHTML = editing ? editorHtml() : summaryHtml();
+    host.innerHTML = `
+      <div class="card">
+        <div class="card__head"><h2>By dimension</h2><span class="muted">Scored 0–100</span></div>
+        <div class="bars">
+          ${dims.map(([key, v]) => {
+            const n = Number(v.score) || 0;
+            const modelN = Number(score.dimensions?.[key]?.score) || 0;
+            return barRow({
+              rank: null,
+              label: dimLabel(key, v),
+              sub: score.is_overridden && n !== modelN ? `Model said ${modelN}` : null,
+              value: n,
+              display: String(n),
+              max: SCORE_MAX,
+              color: scoreTone(n),
+            });
+          }).join('')}
+        </div>
+        <div style="margin-top:16px;display:flex;flex-direction:column;gap:14px">
+          ${dims.map(([key, v]) => key === editingKey ? editRowHtml(key, v) : viewRowHtml(key, v)).join('')}
+        </div>
+      </div>`;
     wire();
   }
 
-  function summaryHtml() {
+  function viewRowHtml(key, v) {
     return `
-      <div class="card">
-        <div class="card__head">
-          <h2>Dimension scores</h2>
-          ${score.is_overridden
-            ? `<span class="chip chip--warning"><span aria-hidden="true">!</span>Overridden</span>`
-            : `<span class="muted">Not overridden</span>`}
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">
+          <strong>${esc(dimLabel(key, v))} — ${esc(v.score ?? 0)}</strong>
+          ${isAdmin ? `<button class="btn btn--ghost btn--sm" data-review="${esc(key)}" type="button">Manual review</button>` : ''}
         </div>
-        <p class="muted" style="margin:0 0 14px">
-          ${score.is_overridden
-            ? (score.manual_notes ? esc(score.manual_notes) : 'No note left for this override.')
-            : "Adjust a dimension if the model scored it wrong — the overall score and compliance verdict recompute from these plus the compliance findings, so there's nothing else to set here."}
-        </p>
+        <div class="muted" style="margin:4px 0">${esc(v.rationale || '')}</div>
+        ${evidenceHtml(v.evidence, turns)}
+        ${v.reason ? `<div class="muted" style="font-size:12px;margin-top:4px">Reviewer note: ${esc(v.reason)}</div>` : ''}
+      </div>`;
+  }
+
+  function editRowHtml(key, v) {
+    return `
+      <div>
+        <div><strong>${esc(dimLabel(key, v))}</strong> — currently ${esc(v.score ?? 0)}</div>
+        <div class="muted" style="margin:4px 0;font-size:13px">${esc(v.rationale || '')}</div>
+        <label class="field">
+          <span>Corrected score *</span>
+          <input type="number" min="0" max="100" required id="dr-score" value="${esc(v.score ?? 0)}">
+        </label>
+        <label class="field">
+          <span>Explanation *</span>
+          <textarea id="dr-reason" rows="2" required placeholder="Why this dimension was re-graded">${esc(v.reason || '')}</textarea>
+        </label>
         <div style="display:flex;gap:10px">
-          <button class="btn ${score.is_overridden ? '' : 'btn--primary'}" type="button" id="ov-edit">
-            ${score.is_overridden ? 'Edit dimensions' : 'Override dimension scores'}
-          </button>
-          ${score.is_overridden ? `<button class="btn btn--ghost" type="button" id="ov-clear">Revert to model score</button>` : ''}
+          <button class="btn btn--primary" type="button" data-save="${esc(key)}">Save</button>
+          <button class="btn btn--ghost" type="button" data-cancel>Cancel</button>
         </div>
       </div>`;
-  }
-
-  function editorHtml() {
-    const modelDims = entriesOf(score.dimensions);
-    const manualDims = score.manual_dimensions ?? score.dimensions ?? {};
-    const currentFindings = score.manual_findings ?? score.findings ?? [];
-    const preview = recomputeFromFindings(manualDims, currentFindings);
-
-    return `
-      <div class="card">
-        <div class="card__head"><h2>Override dimension scores</h2></div>
-        <form id="override-form">
-          <div class="grid-2" id="ov-preview" style="margin-bottom:6px">
-            <div class="field"><span class="muted">Overall score (computed)</span><strong id="ov-overall-preview">${preview.overallScore}</strong></div>
-            <div class="field"><span class="muted">Compliance (computed)</span><strong id="ov-compliance-preview">${preview.compliancePassed ? 'Pass' : 'Fail'}</strong></div>
-          </div>
-
-          <div class="grid-2" id="ov-dims">
-            ${modelDims.map(([key, v]) => `
-              <label class="field" data-dim="${esc(key)}">
-                <span>${esc(dimLabel(key, v))} <span class="muted">(model ${v.score ?? 0})</span></span>
-                <input type="number" min="0" max="100" data-f="score"
-                       value="${esc(manualDims?.[key]?.score ?? v.score ?? 0)}">
-              </label>`).join('')}
-          </div>
-
-          <label class="field" style="margin-top:18px">
-            <span>Note <span class="muted">(why this was changed)</span></span>
-            <textarea id="ov-notes" rows="3">${esc(score.manual_notes || '')}</textarea>
-          </label>
-
-          <div style="display:flex;gap:10px;margin-top:14px">
-            <button class="btn btn--primary" type="submit" id="ov-save">Save override</button>
-            <button class="btn btn--ghost" type="button" id="ov-cancel">Cancel</button>
-          </div>
-        </form>
-      </div>`;
-  }
-
-  function currentDimensions() {
-    const dimensions = {};
-    host.querySelectorAll('#ov-dims [data-dim]').forEach(row => {
-      const key = row.dataset.dim;
-      const n = Number(row.querySelector('[data-f="score"]').value);
-      const modelEntry = score.dimensions?.[key] ?? {};
-      dimensions[key] = { ...modelEntry, score: Number.isFinite(n) ? n : modelEntry.score };
-    });
-    return dimensions;
   }
 
   function wire() {
-    document.getElementById('ov-edit')?.addEventListener('click', () => { editing = true; render(); });
-    document.getElementById('ov-cancel')?.addEventListener('click', () => { editing = false; render(); });
-
-    document.getElementById('ov-clear')?.addEventListener('click', async () => {
-      if (!confirm('Revert to the model score? Your override values are kept and can be re-applied later.')) return;
-      try {
-        await db.clearScoreOverride(score.id);
-        toast('Reverted to model score.', 'ok');
-        onSaved();
-      } catch (err) { toast(err.message, 'error'); }
+    host.querySelectorAll('[data-review]').forEach(btn => {
+      btn.addEventListener('click', () => { editingKey = btn.dataset.review; render(); });
     });
+    host.querySelector('[data-cancel]')?.addEventListener('click', () => { editingKey = null; render(); });
 
-    // Live preview: typing a dimension score updates the computed overall
-    // score/compliance immediately, before Save is even clicked.
-    host.querySelectorAll('#ov-dims [data-f="score"]').forEach(input => {
-      input.addEventListener('input', () => {
-        const currentFindings = score.manual_findings ?? score.findings ?? [];
-        const preview = recomputeFromFindings(currentDimensions(), currentFindings);
-        host.querySelector('#ov-overall-preview').textContent = preview.overallScore;
-        host.querySelector('#ov-compliance-preview').textContent = preview.compliancePassed ? 'Pass' : 'Fail';
-      });
-    });
+    host.querySelector('[data-save]')?.addEventListener('click', async btnEvent => {
+      const btn = btnEvent.currentTarget;
+      const key = btn.dataset.save;
+      const n = Number(host.querySelector('#dr-score').value);
+      const reason = host.querySelector('#dr-reason').value.trim();
 
-    document.getElementById('override-form')?.addEventListener('submit', async e => {
-      e.preventDefault();
-      const btn = document.getElementById('ov-save');
+      if (!Number.isFinite(n) || n < 0 || n > 100) return toast('Enter a score between 0 and 100.', 'error');
+      if (!reason) return toast('Add an explanation for the change.', 'error');
 
-      const dimensions = currentDimensions();
+      const updatedDims = { ...eff.dimensions, [key]: { ...eff.dimensions[key], score: n, reason } };
       const currentFindings = score.manual_findings ?? score.findings ?? [];
-      const { overallScore, compliancePassed } = recomputeFromFindings(dimensions, currentFindings);
+      const { overallScore, compliancePassed } = recomputeFromFindings(updatedDims, currentFindings);
 
       btn.disabled = true;
       btn.textContent = 'Saving…';
       try {
         await db.saveScoreOverride(score.id, {
           overall_score: overallScore,
-          dimensions,
+          dimensions: updatedDims,
           compliance_passed: compliancePassed,
           findings: currentFindings,
-          notes: document.getElementById('ov-notes').value.trim(),
+          notes: score.manual_notes || '',
         });
-        toast('Override saved.', 'ok');
+        toast('Dimension updated.', 'ok');
         onSaved();
       } catch (err) {
         toast(err.message, 'error');
         btn.disabled = false;
-        btn.textContent = 'Save override';
+        btn.textContent = 'Save';
       }
     });
   }
+}
+
+// A pure status display now — current grade vs. the model's original, side
+// by side, per Ryan 2026-09-17. There's nothing left to edit here: dimension
+// scores have their own Manual review buttons above, findings have theirs
+// below, and overall score / compliance are always derived from both via
+// recomputeFromFindings(), never typed directly.
+async function drawOverride(score, onSaved) {
+  const host = document.getElementById('override-area');
+  if (!host) return;
+
+  const eff = effectiveOf(score);
+
+  host.innerHTML = `
+    <div class="card">
+      <div class="card__head">
+        <h2>Current grade</h2>
+        ${score.is_overridden
+          ? `<span class="chip chip--warning"><span aria-hidden="true">!</span>Overridden</span>`
+          : `<span class="muted">As scored by the model</span>`}
+      </div>
+      <div class="grid-2">
+        <div class="field">
+          <span class="muted">Overall score</span>
+          <strong style="font-size:22px">${eff.overall_score}</strong>
+          ${score.is_overridden ? `<span class="muted" style="font-size:12px;display:block">Model originally scored ${score.overall_score}</span>` : ''}
+        </div>
+        <div class="field">
+          <span class="muted">Compliance</span>
+          <strong style="font-size:22px">${eff.compliance_passed ? 'Pass' : 'Fail'}</strong>
+          ${score.is_overridden ? `<span class="muted" style="font-size:12px;display:block">Model originally said ${score.compliance_passed ? 'pass' : 'fail'}</span>` : ''}
+        </div>
+      </div>
+      <p class="muted" style="margin:14px 0 0;font-size:13px">
+        ${score.is_overridden
+          ? "Both numbers recompute automatically from the dimension scores and compliance findings below — use their own Manual review buttons to change either one."
+          : "Use the Manual review button on a dimension or a compliance finding below to correct it — the overall score and compliance verdict recompute automatically from there."}
+      </p>
+      ${score.is_overridden ? `<div style="margin-top:14px"><button class="btn btn--ghost" type="button" id="ov-clear">Revert everything to the model's original score</button></div>` : ''}
+    </div>`;
+
+  document.getElementById('ov-clear')?.addEventListener('click', async () => {
+    if (!confirm('Revert to the model score? Every dimension and finding override is kept and can be re-applied later — this only flips which set counts.')) return;
+    try {
+      await db.clearScoreOverride(score.id);
+      toast('Reverted to model score.', 'ok');
+      onSaved();
+    } catch (err) { toast(err.message, 'error'); }
+  });
 }
 
 /* --- human grading -------------------------------------------------------
@@ -1113,10 +1146,11 @@ function evidenceHtml(text, turns, { inline = false } = {}) {
     : `<blockquote class="evidence${jumpClass}" style="margin:0;padding-left:12px;border-left:2px solid var(--grid);font-size:13px"${jumpAttrs}>${esc(text)}</blockquote>`;
 }
 
-function scoreHtml(score, turns = []) {
+// KPIs + Summary. Split from scoreFooterHtml() so the interactive By
+// dimension and Compliance findings sections can render between them in the
+// page's actual visual order, instead of being appended after everything.
+function scoreHeaderHtml(score) {
   const eff = effectiveOf(score);
-  const strengths = Array.isArray(score.strengths) ? score.strengths : [];
-  const improvements = Array.isArray(score.improvements) ? score.improvements : [];
   const visibleFindings = eff.findings.filter(f => !f.dismissed);
 
   return `
@@ -1164,38 +1198,14 @@ function scoreHtml(score, turns = []) {
         <span class="muted">${esc(score.model)} · rubric ${esc(score.rubric_version)}</span>
       </div>
       <p style="margin:0">${esc(score.summary)}</p>
-    </div>
+    </div>`;
+}
 
-    <div class="card">
-      <div class="card__head"><h2>By dimension</h2><span class="muted">Scored 0–100</span></div>
-      <div class="bars">
-        ${entriesOf(eff.dimensions).map(([key, v]) => {
-          const n = Number(v.score) || 0;
-          const modelN = Number(score.dimensions?.[key]?.score) || 0;
-          return barRow({
-            rank: null,
-            label: dimLabel(key, v),
-            sub: score.is_overridden && n !== modelN ? `Model said ${modelN}` : null,
-            value: n,
-            display: String(n),
-            max: SCORE_MAX,
-            color: scoreTone(n),
-          });
-        }).join('')}
-      </div>
-      <details style="margin-top:16px">
-        <summary class="muted" style="cursor:pointer;font-size:12px">Rationale and evidence</summary>
-        <div style="margin-top:12px;display:flex;flex-direction:column;gap:14px">
-          ${dimensionEntries(score).map(([key, v]) => `
-              <div>
-                <strong>${esc(dimLabel(key, v))} — ${esc(v.score ?? 0)}</strong>
-                <div class="muted" style="margin:4px 0">${esc(v.rationale || '')}</div>
-                ${evidenceHtml(v.evidence, turns)}
-              </div>`).join('')}
-        </div>
-      </details>
-    </div>
+function scoreFooterHtml(score) {
+  const strengths = Array.isArray(score.strengths) ? score.strengths : [];
+  const improvements = Array.isArray(score.improvements) ? score.improvements : [];
 
+  return `
     <div class="card">
       <div class="grid-2">
         <div>
