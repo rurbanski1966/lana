@@ -248,7 +248,7 @@ export async function reviews(main, ctx) {
       </label>
 
       <label class="field">
-        <span>Agent Assigned</span>
+        <span>Agency Assigned</span>
         <select id="team_id">
           <option value="">— none —</option>
           ${teams.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}
@@ -497,7 +497,7 @@ export async function reviews(main, ctx) {
           </select>
         </label>
         <label class="field">
-          <span>Agent Assigned</span>
+          <span>Agency Assigned</span>
           <select id="ed-team_id">
             <option value="">— none —</option>
             ${teams.map(t => `<option value="${esc(t.id)}"${t.id === row.team_id ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}
@@ -583,7 +583,7 @@ export async function reviewDetail(main, ctx, recordingId) {
           <div class="page__sub">
             ${esc(fmtDate(rec.call_on))} · ${esc(rec.agent?.full_name || rec.agent_name || '—')}
             ${rec.call_type ? ` · ${esc(CALL_TYPES.find(t => t.value === rec.call_type)?.label || rec.call_type)}` : ''}
-            ${rec.team?.name ? ` · Agent Assigned: ${esc(rec.team.name)}` : ''}
+            ${rec.team?.name ? ` · Agency Assigned: ${esc(rec.team.name)}` : ''}
             ${rec.script?.name ? ` · Script: ${esc(rec.script.name)}` : ''} · ${statusChipFor(rec.status)}
           </div>
         </div>
