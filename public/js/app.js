@@ -6,7 +6,7 @@ import { toast, esc } from './ui.js';
 
 // Bump when debugging a stale-cache problem: if the browser doesn't show this
 // exact string, it is running old code and nothing else you observe is real.
-const BUILD = 'build-4';
+const BUILD = 'build-5';
 
 const el = id => document.getElementById(id);
 
@@ -42,7 +42,6 @@ console.info(`Lana ${BUILD} — config loaded, URL ${SUPABASE_URL}`);
 const db = await import('./db.js');
 const agentViews = await import('./views-agent.js');
 const adminViews = await import('./views-admin.js');
-const dialerViews = await import('./views-dialer.js');
 const scoringViews = await import('./views-scoring.js');
 const rubricViews = await import('./views-rubric.js');
 const accountViews = await import('./views-account.js');
@@ -56,15 +55,7 @@ const ctx = { profile: null };
 // bounce here and an empty result from Postgres either way.
 const ROUTES = {
   '#/dashboard':            { title: 'Dashboard',   render: agentViews.dashboard,    roles: ['agent', 'admin'] },
-  '#/submit':               { title: 'Log a sale',  render: agentViews.submit,       roles: ['agent', 'admin'] },
   '#/my-sales':             { title: 'My sales',    render: agentViews.mySales,      roles: ['agent', 'admin'] },
-  '#/my-appointments':      { title: 'My appointments', render: agentViews.myAppointments, roles: ['agent', 'admin'] },
-  '#/leaderboard':          { title: 'Leaderboard', render: agentViews.leaderboard,  roles: ['agent', 'admin'] },
-
-  '#/dialer':               { title: 'Dialer dashboard', render: dialerViews.dashboard,    roles: ['dialer', 'admin'] },
-  '#/dialer/log':           { title: 'Log activity',     render: dialerViews.logActivity,  roles: ['dialer', 'admin'] },
-  '#/dialer/appointments':  { title: 'Appointment book', render: dialerViews.appointments, roles: ['dialer', 'admin'] },
-  '#/dialer/leaderboard':   { title: 'Dialer board',     render: dialerViews.leaderboard,  roles: ['dialer', 'admin'] },
 
   '#/reviews':              { title: 'Call reviews', render: scoringViews.reviews, roles: ['agent', 'dialer', 'admin'] },
   // Readable by everyone on purpose — people graded against a standard should
@@ -72,8 +63,6 @@ const ROUTES = {
   '#/rubric':               { title: 'Scoring rubric', render: rubricViews.rubric, roles: ['agent', 'dialer', 'admin'] },
 
   '#/admin/agents':         { title: 'Agents',      render: adminViews.agents,      roles: ['admin'] },
-  '#/admin/submissions':    { title: 'Submissions', render: adminViews.submissions, roles: ['admin'] },
-  '#/admin/dialers':        { title: 'Dialer activity', render: adminViews.dialers, roles: ['admin'] },
   '#/admin/scorecard':      { title: 'Scorecard',   render: scoringViews.scorecard, roles: ['admin'] },
   '#/admin/calibration':    { title: 'Calibration', render: scoringViews.calibration, roles: ['admin'] },
   '#/admin/reports':        { title: 'Reports',     render: adminViews.reports,     roles: ['admin'] },
@@ -109,17 +98,17 @@ function resolve(hash) {
 }
 
 const NAV = [
-  { section: 'Agent',    items: ['#/dashboard', '#/submit', '#/my-sales', '#/my-appointments', '#/leaderboard'] },
-  { section: 'Dialer',   items: ['#/dialer', '#/dialer/log', '#/dialer/appointments', '#/dialer/leaderboard'] },
+  { section: 'Agent',    items: ['#/dashboard', '#/my-sales'] },
   { section: 'Coaching', items: ['#/reviews', '#/rubric'] },
-  { section: 'Admin',    items: ['#/admin/agents', '#/admin/submissions', '#/admin/dialers', '#/admin/scorecard', '#/admin/calibration', '#/admin/reports'] },
+  { section: 'Admin',    items: ['#/admin/agents', '#/admin/scorecard', '#/admin/calibration', '#/admin/reports'] },
 ];
 
 const allowed = href => ROUTES[href].roles.includes(ctx.profile.role);
 
-// Where a role lands on sign-in and after a bad hash. A dialer sent to the
-// agent dashboard would get bounced straight back out of it.
-const homeFor = role => (role === 'dialer' ? '#/dialer' : '#/dashboard');
+// Where a role lands on sign-in and after a bad hash. The dialer role has no
+// home page of its own anymore (the Dialer section was removed) — send it to
+// the one route it's still allowed on, rather than a dashboard it can't see.
+const homeFor = role => (role === 'dialer' ? '#/reviews' : '#/dashboard');
 
 function buildNav() {
   el('nav').innerHTML = NAV
