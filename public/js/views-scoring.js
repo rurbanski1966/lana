@@ -1063,17 +1063,20 @@ function effectiveOf(score) {
    A finding never had a number, only a severity — the rubric assigns one
    directly. A manual re-grade puts a number in (0 = most severe, 100 = no
    issue) and severity is derived from it, per Ryan 2026-09-17, so the two
-   can never drift apart the way a separate severity dropdown could.
+   can never drift apart the way a separate severity dropdown could. A
+   perfect 100 reads as "Good" (green), not "Low" — the model never assigns
+   that tier itself, since it only reports findings that are issues; "Good"
+   only exists as the outcome of a manual correction, per Ryan 2026-09-17.
    -------------------------------------------------------------------------- */
 const scoreToSeverity = n =>
-  n <= 39 ? 'critical' : n <= 59 ? 'high' : n <= 79 ? 'medium' : 'low';
+  n >= 100 ? 'good' : n <= 39 ? 'critical' : n <= 59 ? 'high' : n <= 79 ? 'medium' : 'low';
 
 // Starting point when a finding has no manual score yet — the midpoint of
 // its current severity's band, so the input opens already agreeing with
 // what the AI decided rather than an arbitrary number.
-const severityToScore = sev => ({ critical: 20, high: 50, medium: 70, low: 90 }[sev] ?? 70);
+const severityToScore = sev => ({ critical: 20, high: 50, medium: 70, low: 90, good: 100 }[sev] ?? 70);
 
-const SEVERITY_RANK = { critical: 3, high: 2, medium: 1, low: 0 };
+const SEVERITY_RANK = { critical: 3, high: 2, medium: 1, low: 0, good: -1 };
 
 // Per Ryan 2026-09-17: overall score starts from the dimension average, then
 // gets capped by the worst surviving finding — a Critical finding can never

@@ -56,6 +56,10 @@ export const FINDING_CODES = {
 };
 
 export const FINDING_SEVERITIES = [
+  // 'good' only ever comes from a manual re-grade scored a perfect 100 — the
+  // model itself never assigns it, since it only reports findings that ARE
+  // issues. A fully-corrected finding reads as resolved, not merely "low".
+  { value: 'good',     label: 'Good',     tone: 'good',     icon: '✓' },
   { value: 'low',      label: 'Low',      tone: 'warning',  icon: '·' },
   { value: 'medium',   label: 'Medium',   tone: 'warning',  icon: '!' },
   { value: 'high',     label: 'High',     tone: 'serious',  icon: '!!' },
