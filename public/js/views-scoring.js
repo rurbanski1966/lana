@@ -500,7 +500,7 @@ export async function reviewDetail(main, ctx, recordingId) {
           </form>` : ''}
       </div>
 
-      <div id="score-area">${score ? scoreHtml(score, turns) : ''}</div>
+      <div id="score-area">${score ? scoreHtml(score, turns, ctx.profile.role === 'admin') : ''}</div>
       <div id="override-area">${score && ctx.profile.role === 'admin' ? spinner() : ''}</div>
       <div id="review-area">${score ? spinner() : ''}</div>
 
@@ -525,6 +525,14 @@ export async function reviewDetail(main, ctx, recordingId) {
     document.getElementById('reload').addEventListener('click', draw);
     if (score && ctx.profile.role === 'admin') drawOverride(score, draw);
     if (score) drawReview(score);
+
+    // "Manual review" in the Compliance findings header is a shortcut into
+    // the Manual override card below, not a separate system — jump there and
+    // open it straight to the edit form.
+    document.getElementById('jump-override')?.addEventListener('click', () => {
+      document.getElementById('override-area')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document.getElementById('ov-edit')?.click();
+    });
 
     document.getElementById('play')?.addEventListener('click', async e => {
       e.target.disabled = true;
@@ -973,7 +981,7 @@ function evidenceHtml(text, turns, { inline = false } = {}) {
     : `<blockquote class="evidence${jumpClass}" style="margin:0;padding-left:12px;border-left:2px solid var(--grid);font-size:13px"${jumpAttrs}>${esc(text)}</blockquote>`;
 }
 
-function scoreHtml(score, turns = []) {
+function scoreHtml(score, turns = [], isAdmin = false) {
   const eff = effectiveOf(score);
   const strengths = Array.isArray(score.strengths) ? score.strengths : [];
   const improvements = Array.isArray(score.improvements) ? score.improvements : [];
@@ -1059,7 +1067,10 @@ function scoreHtml(score, turns = []) {
     <div class="card">
       <div class="card__head">
         <h2>Compliance findings</h2>
-        <span class="muted">${eff.compliance_passed ? 'Passed' : 'Needs attention'}</span>
+        <div style="display:flex;align-items:baseline;gap:12px">
+          <span class="muted">${eff.compliance_passed ? 'Passed' : 'Needs attention'}</span>
+          ${isAdmin ? `<button class="btn btn--ghost btn--sm" id="jump-override" type="button">Manual review</button>` : ''}
+        </div>
       </div>
       ${visibleFindings.length === 0 ? empty('No compliance issues found.') : `
         <div class="tablewrap"><table>
