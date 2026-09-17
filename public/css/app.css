@@ -169,6 +169,26 @@ code {
 }
 .field textarea { resize: vertical; min-height: 60px; }
 
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 22px 14px;
+  text-align: center;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+  transition: border-color .15s, background .15s;
+}
+.dropzone:hover, .dropzone:focus-visible {
+  border-color: var(--text-secondary);
+  outline: none;
+}
+.dropzone--active {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 8%, transparent);
+  color: var(--text-primary);
+}
+
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
 @media (max-width: 620px) { .grid-2 { grid-template-columns: 1fr; } }
 

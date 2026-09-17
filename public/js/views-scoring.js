@@ -242,7 +242,10 @@ export async function reviews(main, ctx) {
 
       <label class="field">
         <span>Audio file</span>
-        <input type="file" id="audio" accept="audio/*">
+        <div id="audio-dropzone" class="dropzone" tabindex="0" role="button">
+          <input type="file" id="audio" accept="audio/*" style="display:none">
+          <span id="audio-dropzone-text">Drag and drop an audio file here, or click to browse</span>
+        </div>
         <span class="muted" style="font-size:12px">Optional. Up to 100 MB. Needed only if you want automatic transcription.</span>
       </label>
 
@@ -254,6 +257,44 @@ export async function reviews(main, ctx) {
 
       <button class="btn btn--primary" type="submit" id="rec-save">Add call</button>
     </form>`;
+
+  /* --- audio drag-and-drop --- */
+  const audioInput = newCard.querySelector('#audio');
+  const dropzone = newCard.querySelector('#audio-dropzone');
+  const dropzoneText = newCard.querySelector('#audio-dropzone-text');
+  const DROPZONE_DEFAULT = 'Drag and drop an audio file here, or click to browse';
+
+  const syncDropzoneText = () => {
+    dropzoneText.textContent = audioInput.files[0]?.name || DROPZONE_DEFAULT;
+  };
+
+  dropzone.addEventListener('click', () => audioInput.click());
+  dropzone.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); audioInput.click(); }
+  });
+  audioInput.addEventListener('change', syncDropzoneText);
+
+  ['dragenter', 'dragover'].forEach(evt => dropzone.addEventListener(evt, e => {
+    e.preventDefault();
+    dropzone.classList.add('dropzone--active');
+  }));
+  ['dragleave', 'drop'].forEach(evt => dropzone.addEventListener(evt, e => {
+    e.preventDefault();
+    dropzone.classList.remove('dropzone--active');
+  }));
+  dropzone.addEventListener('drop', e => {
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('audio/')) return toast('Drop an audio file.', 'error');
+    // A plain FileList can't be built directly — DataTransfer is the
+    // standard way to hand a dropped file to a real <input type="file">
+    // so the rest of the form (and its submit handler) sees it exactly
+    // like a click-to-browse selection.
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    audioInput.files = dt.files;
+    syncDropzoneText();
+  });
 
   newCard.querySelector('#rec-form').addEventListener('submit', async e => {
     e.preventDefault();
@@ -293,6 +334,7 @@ export async function reviews(main, ctx) {
       toast('Call added.', 'ok');
       newCard.querySelector('#rec-form').reset();
       newCard.querySelector('#call_on').value = today();
+      syncDropzoneText();
       draw();
     } catch (err) {
       toast(err.message, 'error');
