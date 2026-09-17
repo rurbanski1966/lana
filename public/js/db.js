@@ -238,7 +238,7 @@ export async function adminReport(start, end) {
 /* --- call scoring -------------------------------------------------------- */
 const RECORDING_COLS =
   'id, agent_id, agent_name, uploaded_by, title, call_on, duration_seconds, storage_path, ' +
-  'transcript_source, status, error_message, created_at, script_id, ' +
+  'transcript_source, status, error_message, created_at, script_id, call_type, ' +
   'agent:profiles!call_recordings_agent_id_fkey(full_name), script:scripts(name)';
 
 // Deliberately omits `transcript`. A list of 50 calls would otherwise pull
@@ -288,6 +288,7 @@ export async function createRecording(input) {
         uploaded_by: session.user.id,
         appointment_id: input.appointment_id || null,
         script_id: input.script_id || null,
+        call_type: input.call_type || null,
         title: input.title || '',
         call_on: input.call_on,
         duration_seconds: input.duration_seconds ?? null,

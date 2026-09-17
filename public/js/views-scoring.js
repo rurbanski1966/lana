@@ -6,7 +6,7 @@
 // client.
 // ---------------------------------------------------------------------------
 import * as db from './db.js';
-import { SCORE_DIMENSIONS, FINDING_CODES, FINDING_SEVERITIES, RECORDING_STATUSES } from './config.js';
+import { SCORE_DIMENSIONS, FINDING_CODES, FINDING_SEVERITIES, RECORDING_STATUSES, CALL_TYPES } from './config.js';
 import {
   esc, fmtNum, fmtDate, fmtMoneyExact, today, range, RANGES,
   toast, statTile, barRow, empty, spinner, selectField,
@@ -222,6 +222,14 @@ export async function reviews(main, ctx) {
         </label>` : ''}
 
       <label class="field">
+        <span>Call type</span>
+        <select id="call_type">
+          <option value="">— none —</option>
+          ${CALL_TYPES.map(t => `<option value="${esc(t.value)}">${esc(t.label)}</option>`).join('')}
+        </select>
+      </label>
+
+      <label class="field">
         <span>Script</span>
         <select id="script_id">
           <option value="">— none / general —</option>
@@ -276,6 +284,7 @@ export async function reviews(main, ctx) {
         agent_id: agentId,
         agent_name: agentName,
         script_id: val('script_id') || null,
+        call_type: val('call_type') || null,
         title: val('title'),
         call_on: val('call_on'),
         storage_path: storagePath,
@@ -408,6 +417,13 @@ export async function reviews(main, ctx) {
             <input type="text" id="ed-agent" list="agent-datalist" required value="${esc(currentAgentName)}">
           </label>` : ''}
         <label class="field">
+          <span>Call type</span>
+          <select id="ed-call_type">
+            <option value="">— none —</option>
+            ${CALL_TYPES.map(t => `<option value="${esc(t.value)}"${t.value === row.call_type ? ' selected' : ''}>${esc(t.label)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="field">
           <span>Script</span>
           <select id="ed-script">
             <option value="">— none / general —</option>
@@ -431,6 +447,7 @@ export async function reviews(main, ctx) {
         title: editCard.querySelector('#ed-title').value.trim(),
         call_on: editCard.querySelector('#ed-call_on').value,
         script_id: editCard.querySelector('#ed-script').value || null,
+        call_type: editCard.querySelector('#ed-call_type').value || null,
       };
 
       if (isAdmin) {
@@ -484,6 +501,7 @@ export async function reviewDetail(main, ctx, recordingId) {
           <h1>${esc(rec.title || 'Untitled call')}</h1>
           <div class="page__sub">
             ${esc(fmtDate(rec.call_on))} · ${esc(rec.agent?.full_name || rec.agent_name || '—')}
+            ${rec.call_type ? ` · ${esc(CALL_TYPES.find(t => t.value === rec.call_type)?.label || rec.call_type)}` : ''}
             ${rec.script?.name ? ` · Script: ${esc(rec.script.name)}` : ''} · ${statusChipFor(rec.status)}
           </div>
         </div>

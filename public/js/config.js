@@ -34,6 +34,13 @@ export const ROLES = [
   { value: 'dialer', label: 'Dialer' },
 ];
 
+// A call's category — Ancillary or Medicare — separate from CATEGORIES above,
+// which is for sales submissions, not calls.
+export const CALL_TYPES = [
+  { value: 'ancillary', label: 'Ancillary' },
+  { value: 'medicare',  label: 'Medicare' },
+];
+
 // Must match the DIMENSIONS array in supabase/functions/score-call/rubric.ts.
 // If you add a dimension there, add it here or the UI silently drops it.
 export const SCORE_DIMENSIONS = [
