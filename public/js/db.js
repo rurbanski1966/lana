@@ -640,3 +640,11 @@ export async function scoringSpend(start, end) {
     }
   );
 }
+
+// Fixed day/week(Mon-Sun)/month(1st-last) grading spend, org-wide and per
+// team — not tied to the Period selector elsewhere on Scorecard, since these
+// windows are always "right now," not a chosen range.
+export async function spendSummary() {
+  await requireSession();
+  return unwrap(await supabase.rpc('spend_summary')) ?? [];
+}

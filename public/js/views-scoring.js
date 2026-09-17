@@ -1602,6 +1602,44 @@ export async function agentLeaderboard(main) {
   await draw();
 }
 
+// Fixed day/week/month grading spend — always "right now," independent of
+// the Period dropdown below it, which looks at a chosen range instead. Team
+// rows come from whatever spend_summary() actually returned, so a new team
+// shows up here with no code change.
+function spendSectionHtmlFor(rows) {
+  const find = (scope, period) => rows.find(r => r.scope === scope && r.period === period)
+    ?? { total_cost: 0, calls_scored: 0 };
+  const day = find('All', 'day');
+  const week = find('All', 'week');
+  const month = find('All', 'month');
+  const teams = [...new Set(rows.filter(r => r.scope !== 'All').map(r => r.scope))];
+
+  const callsNote = n => `${fmtNum(n)} call${Number(n) === 1 ? '' : 's'}`;
+
+  return `
+    <div class="card">
+      <div class="card__head">
+        <h2>Spend</h2>
+        <span class="muted">Grading cost only — transcription cost isn't tracked per call</span>
+      </div>
+      <div class="kpis">
+        ${statTile({ label: 'Daily spend', value: fmtMoneyExact(day.total_cost), note: `${callsNote(day.calls_scored)} today` })}
+        ${statTile({ label: 'Weekly spend', value: fmtMoneyExact(week.total_cost), note: 'Monday–Sunday, this week' })}
+        ${statTile({ label: 'Monthly spend', value: fmtMoneyExact(month.total_cost), note: 'This month' })}
+      </div>
+      ${teams.map(name => {
+        const w = find(name, 'week');
+        const m = find(name, 'month');
+        return `
+          <div class="card__head" style="margin-top:18px"><h3 style="margin:0">${esc(name)}</h3></div>
+          <div class="kpis">
+            ${statTile({ label: 'This week', value: fmtMoneyExact(w.total_cost), note: callsNote(w.calls_scored) })}
+            ${statTile({ label: 'This month', value: fmtMoneyExact(m.total_cost), note: callsNote(m.calls_scored) })}
+          </div>`;
+      }).join('')}
+    </div>`;
+}
+
 /* === Admin scorecard ====================================================== */
 export async function scorecard(main) {
   main.innerHTML = `
@@ -1618,17 +1656,20 @@ export async function scorecard(main) {
   async function draw() {
     body.innerHTML = spinner();
     const { start, end } = range(rangeSel.value);
-    const [board, spend] = await Promise.all([
+    const [board, spend, spendFixed] = await Promise.all([
       db.scoringLeaderboard(start, end),
       db.scoringSpend(start, end),
+      db.spendSummary(),
     ]);
 
+    const spendSectionHtml = spendSectionHtmlFor(spendFixed);
+
     if (board.length === 0) {
-      body.innerHTML = `<div class="card">${empty('No calls scored in this period.')}</div>`;
+      body.innerHTML = spendSectionHtml + `<div class="card">${empty('No calls scored in this period.')}</div>`;
       return;
     }
 
-    body.innerHTML = `
+    body.innerHTML = spendSectionHtml + `
       <div class="kpis">
         ${statTile({ label: 'Calls scored', value: fmtNum(spend.calls_scored), note: `${esc(fmtDate(start))} – ${esc(fmtDate(end))}` })}
         ${statTile({ label: 'Scoring spend', value: fmtMoneyExact(spend.total_cost_usd), note: `${fmtMoneyExact(spend.avg_cost_usd)} per call` })}
