@@ -239,7 +239,9 @@ export async function adminReport(start, end) {
 const RECORDING_COLS =
   'id, agent_id, agent_name, uploaded_by, title, call_on, duration_seconds, storage_path, ' +
   'transcript_source, status, error_message, created_at, script_id, call_type, ' +
-  'agent:profiles!call_recordings_agent_id_fkey(full_name), script:scripts(name)';
+  'reviewer_approved, reviewer_approved_at, ' +
+  'agent:profiles!call_recordings_agent_id_fkey(full_name), script:scripts(name), ' +
+  'reviewer:profiles!call_recordings_reviewer_approved_by_fkey(full_name)';
 
 // Deliberately omits `transcript`. A list of 50 calls would otherwise pull
 // 50 full transcripts over the wire to render 50 table rows.
@@ -326,6 +328,24 @@ export async function updateRecording(id, patch) {
     await supabase
       .from('call_recordings')
       .update(patch)
+      .eq('id', id)
+      .select()
+      .single()
+  );
+}
+
+// Separate from the AI score and any manual override of it — just whether a
+// human has looked at the call and signed off.
+export async function setReviewerApproval(id, approved) {
+  const session = await requireSession();
+  return unwrap(
+    await supabase
+      .from('call_recordings')
+      .update({
+        reviewer_approved: approved,
+        reviewer_approved_by: approved ? session.user.id : null,
+        reviewer_approved_at: approved ? new Date().toISOString() : null,
+      })
       .eq('id', id)
       .select()
       .single()

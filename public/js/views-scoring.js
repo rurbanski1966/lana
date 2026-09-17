@@ -20,6 +20,13 @@ const statusChipFor = status => {
   return `<span class="chip chip--${s.tone}"><span aria-hidden="true">${s.icon}</span>${esc(s.label)}</span>`;
 };
 
+// Separate from the AI score — whether a human reviewer has looked at the
+// call and signed off, set only from the Approve button on the call's own
+// page.
+const reviewerStatusChip = approved => approved
+  ? `<span class="chip chip--good"><span aria-hidden="true">✓</span>Approved</span>`
+  : `<span class="chip chip--warning"><span aria-hidden="true">◷</span>Pending</span>`;
+
 const severityChip = severity => {
   const s = FINDING_SEVERITIES.find(x => x.value === severity);
   if (!s) return esc(severity);
@@ -395,7 +402,7 @@ export async function reviews(main, ctx) {
       </div>
       <div class="tablewrap"><table>
         <thead><tr>
-          <th>Date</th><th>Call</th><th>Agent</th><th>Length</th><th>Status</th><th></th>
+          <th>Date</th><th>Call</th><th>Agent</th><th>Length</th><th>Status</th><th>Reviewer status</th><th></th>
         </tr></thead>
         <tbody>${rows.map(r => {
           // Mirrors RLS: an admin can touch any row; anyone else only their
@@ -412,6 +419,7 @@ export async function reviews(main, ctx) {
             <td>${esc(r.agent?.full_name || r.agent_name || '—')}</td>
             <td class="tnum muted">${esc(fmtDuration(r.duration_seconds))}</td>
             <td>${statusChipFor(r.status)}</td>
+            <td>${reviewerStatusChip(r.reviewer_approved)}</td>
             <td style="display:flex;gap:6px;flex-wrap:wrap">
               <a class="btn btn--ghost btn--sm" href="#/reviews/${esc(r.id)}">Open</a>
               ${canEdit ? `<button class="btn btn--ghost btn--sm" data-action="edit" type="button">Edit</button>` : ''}
@@ -615,6 +623,22 @@ export async function reviewDetail(main, ctx, recordingId) {
           </div>
           <div id="transcript-view">${transcriptHtml(rec.transcript, rec.transcript_segments)}</div>
           <pre id="transcript-raw" class="transcript-raw" hidden>${esc(rec.transcript)}</pre>
+        </div>` : ''}
+
+      ${ctx.profile.role === 'admin' ? `
+        <div class="card">
+          <div class="card__head">
+            <h2>Reviewer status</h2>
+            ${reviewerStatusChip(rec.reviewer_approved)}
+          </div>
+          <p class="muted" style="margin:0 0 14px">
+            ${rec.reviewer_approved
+              ? `Approved by ${esc(rec.reviewer?.full_name || 'an admin')} · ${esc(fmtDate(rec.reviewer_approved_at))}`
+              : 'Mark this call approved once a reviewer has gone through it.'}
+          </p>
+          <button class="btn ${rec.reviewer_approved ? 'btn--ghost' : 'btn--primary'}" id="reviewer-toggle" type="button">
+            ${rec.reviewer_approved ? 'Mark as pending' : 'Approve'}
+          </button>
         </div>` : ''}`;
 
     document.getElementById('reload').addEventListener('click', draw);
@@ -622,6 +646,20 @@ export async function reviewDetail(main, ctx, recordingId) {
     if (score) drawDimensions(score, ctx, turns, draw);
     if (score) drawFindings(score, ctx, turns, draw);
     if (score) drawReview(score);
+
+    document.getElementById('reviewer-toggle')?.addEventListener('click', async e => {
+      const btn = e.currentTarget;
+      const next = !rec.reviewer_approved;
+      btn.disabled = true;
+      try {
+        await db.setReviewerApproval(rec.id, next);
+        toast(next ? 'Call approved.' : 'Marked as pending.', 'ok');
+        draw();
+      } catch (err) {
+        toast(err.message, 'error');
+        btn.disabled = false;
+      }
+    });
 
     document.getElementById('play')?.addEventListener('click', async e => {
       e.target.disabled = true;
