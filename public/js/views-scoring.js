@@ -35,7 +35,17 @@ const SCORE_MAX = 100;
 // list. The rubric is editable, so a score from an older version may carry
 // dimensions that no longer exist — and a newer one may add some. Iterating a
 // hardcoded list would silently drop both.
-const entriesOf = dims => Object.entries(dims ?? {}).filter(([, v]) => v && typeof v === 'object');
+//
+// Sorted by SCORE_DIMENSIONS' order rather than left in whatever order they
+// come back in: Postgres jsonb does not guarantee it preserves key insertion
+// order the way a JS object literal does, so relying on it made the displayed
+// order effectively random per row. A dimension the rubric added that isn't
+// in SCORE_DIMENSIONS sorts after all the known ones, in whatever order it
+// arrived — that case is rare enough not to need its own rule.
+const DIMENSION_ORDER = new Map(SCORE_DIMENSIONS.map((d, i) => [d.key, i]));
+const entriesOf = dims => Object.entries(dims ?? {})
+  .filter(([, v]) => v && typeof v === 'object')
+  .sort(([a], [b]) => (DIMENSION_ORDER.get(a) ?? Infinity) - (DIMENSION_ORDER.get(b) ?? Infinity));
 
 // Calibration (score_reviews) always compares against the model's own
 // dimensions, regardless of any override — it's tuning the rubric, not
