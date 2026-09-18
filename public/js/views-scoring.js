@@ -1339,6 +1339,8 @@ function coachingReportHtml(rec, score) {
     good: '#1b8a5a', warning: '#b8860b', serious: '#d2691e', critical: '#c0392b',
   }[tone] || '#666');
   const sevMeta = sev => FINDING_SEVERITIES.find(s => s.value === sev) || { label: sev, tone: 'warning' };
+  // Same 0-69/70-79/80+ bands as the leaderboard's red/yellow/green legend.
+  const scoreBand = n => (n >= 80 ? 'good' : n >= 70 ? 'warn' : 'bad');
 
   return `<!doctype html>
 <html lang="en">
@@ -1359,15 +1361,27 @@ function coachingReportHtml(rec, score) {
   h2 { font-size: 16px; margin: 28px 0 10px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
   .muted { color: #666; font-size: 13px; }
   .kpis { display: flex; gap: 16px; flex-wrap: wrap; margin: 16px 0; }
-  .kpi { border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px; min-width: 140px; }
-  .kpi .lbl { font-size: 12px; color: #666; }
-  .kpi .val { font-size: 24px; font-weight: 600; }
+  /* Always an explicit, opaque background — an unset one can render solid
+     black instead of transparent when html2canvas rasterizes this. */
+  .kpi { border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px; min-width: 140px; background: #f4f4f4; }
+  .kpi .lbl { font-size: 12px; color: #555; }
+  .kpi .val { font-size: 24px; font-weight: 700; color: #1a1a1a; }
+  .kpi--good { background: #e8f7ee; border-color: #1b8a5a; }
+  .kpi--good .val { color: #146c46; }
+  .kpi--warn { background: #fff6e0; border-color: #b8860b; }
+  .kpi--warn .val { color: #8a6508; }
+  .kpi--bad  { background: #fdeceb; border-color: #c0392b; }
+  .kpi--bad  .val { color: #96281d; }
   table { width: 100%; border-collapse: collapse; margin: 8px 0 20px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e5e5e5; vertical-align: top; font-size: 13px; }
   th { color: #666; font-weight: 600; font-size: 12px; text-transform: uppercase; }
   blockquote { margin: 6px 0 0; padding-left: 10px; border-left: 3px solid #ccc; font-size: 12px; color: #444; font-style: italic; }
   .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; color: #fff; font-size: 12px; font-weight: 600; }
   ul { margin: 6px 0; padding-left: 20px; }
+  /* Keep a row/box/quote whole across a page boundary instead of splitting
+     it mid-line, which is what read as "bleeding" and illegible. */
+  tr, .kpi, blockquote, li { page-break-inside: avoid; break-inside: avoid; }
+  h2 { page-break-after: avoid; break-after: avoid; }
 </style>
 </head>
 <body>
@@ -1396,12 +1410,12 @@ function coachingReportHtml(rec, score) {
   </p>
 
   <div class="kpis">
-    <div class="kpi">
+    <div class="kpi kpi--${scoreBand(eff.overall_score)}">
       <div class="lbl">Overall score</div>
       <div class="val">${esc(eff.overall_score)}</div>
       <div class="muted">Model originally scored ${esc(score.overall_score)}</div>
     </div>
-    <div class="kpi">
+    <div class="kpi kpi--${eff.compliance_passed ? 'good' : 'bad'}">
       <div class="lbl">Compliance</div>
       <div class="val">${eff.compliance_passed ? 'Pass' : 'Fail'}</div>
       <div class="muted">Model originally said ${score.compliance_passed ? 'pass' : 'fail'}</div>
