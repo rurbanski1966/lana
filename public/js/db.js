@@ -11,7 +11,7 @@
 // an unauthenticated empty array reach the UI.
 // ---------------------------------------------------------------------------
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=34';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=35';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true },
@@ -472,6 +472,12 @@ async function invokeFunction(name, body) {
 
 export const scoreCall = recordingId => invokeFunction('score-call', { recording_id: recordingId });
 export const transcribeCall = recordingId => invokeFunction('transcribe-call', { recording_id: recordingId });
+
+// AI-written coaching note built only from the reviewer's own manual
+// changes — see summarize-review. Safe to call repeatedly: the function
+// caches its own result and skips the Anthropic call when nothing has
+// changed since the last generation.
+export const generateManualSummary = scoreId => invokeFunction('summarize-review', { score_id: scoreId });
 
 // Creating a user with an admin-chosen password, and deleting one, both need
 // the Auth Admin API — the anon key this file holds can't do either, so both

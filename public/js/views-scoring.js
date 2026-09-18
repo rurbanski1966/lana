@@ -5,12 +5,12 @@
 // and asks an Edge Function to score — the Anthropic key never reaches the
 // client.
 // ---------------------------------------------------------------------------
-import * as db from './db.js?v=34';
-import { SCORE_DIMENSIONS, FINDING_CODES, FINDING_SEVERITIES, RECORDING_STATUSES, CALL_TYPES } from './config.js?v=34';
+import * as db from './db.js?v=35';
+import { SCORE_DIMENSIONS, FINDING_CODES, FINDING_SEVERITIES, RECORDING_STATUSES, CALL_TYPES } from './config.js?v=35';
 import {
   esc, fmtNum, fmtDate, fmtMoneyExact, today, range, RANGES,
   toast, statTile, barRow, empty, spinner, selectField,
-} from './ui.js?v=34';
+} from './ui.js?v=35';
 
 /* --- helpers ------------------------------------------------------------- */
 
@@ -671,6 +671,21 @@ export async function reviewDetail(main, ctx, recordingId) {
       btn.textContent = 'Generating PDF…';
       let container;
       try {
+        if (score?.is_overridden) {
+          btn.textContent = 'Summarizing review…';
+          try {
+            const result = await db.generateManualSummary(score.id);
+            Object.assign(score, {
+              manual_summary: result.summary,
+              manual_strengths: result.strengths,
+              manual_improvements: result.improvements,
+            });
+          } catch (err) {
+            toast(`Could not refresh the AI summary, using the existing one: ${err.message}`, 'error');
+          }
+        }
+
+        btn.textContent = 'Generating PDF…';
         await loadHtml2Pdf();
 
         const html = coachingReportHtml(rec, score);
@@ -731,7 +746,18 @@ export async function reviewDetail(main, ctx, recordingId) {
       btn.disabled = true;
       try {
         await db.setReviewerApproval(rec.id, next);
-        toast(next ? 'Call approved.' : 'Marked as pending.', 'ok');
+
+        let msg = next ? 'Call approved.' : 'Marked as pending.';
+        let tone = 'ok';
+        if (next && score?.is_overridden) {
+          try {
+            await db.generateManualSummary(score.id);
+          } catch (err) {
+            msg = `Approved, but the AI summary could not be generated: ${err.message}`;
+            tone = 'error';
+          }
+        }
+        toast(msg, tone);
         draw();
       } catch (err) {
         toast(err.message, 'error');
@@ -1293,8 +1319,9 @@ function scoreHeaderHtml(score) {
         <p class="muted" style="margin:0">
           By ${esc(score.overridden_by_profile?.full_name || 'an admin')}
           ${score.overridden_at ? `· ${esc(fmtDate(score.overridden_at))}` : ''}
+          ${score.manual_summary ? '· AI-summarized from the review' : '· not yet AI-summarized — click Generate report or Approve'}
         </p>
-        <p style="margin:10px 0 0">${esc(reviewerSummaryText(score))}</p>
+        <p style="margin:10px 0 0">${esc(score.manual_summary || reviewerSummaryText(score))}</p>
       </div>` : ''}
 
     <div class="kpis">
@@ -1332,11 +1359,19 @@ function scoreHeaderHtml(score) {
 }
 
 function scoreFooterHtml(score) {
-  const strengths = Array.isArray(score.strengths) ? score.strengths : [];
-  const improvements = Array.isArray(score.improvements) ? score.improvements : [];
+  // Once a reviewer's override has been AI-summarized (Generate report or
+  // Approve — see summarize-review), that reflects the reviewer's actual
+  // grading and replaces the model's own first-pass lists. Before that's
+  // run, the model's lists are still shown rather than nothing.
+  const usingReviewerVersion = score.is_overridden && Array.isArray(score.manual_strengths);
+  const strengths = usingReviewerVersion ? score.manual_strengths : (Array.isArray(score.strengths) ? score.strengths : []);
+  const improvements = usingReviewerVersion ? score.manual_improvements : (Array.isArray(score.improvements) ? score.improvements : []);
 
   return `
     <div class="card">
+      <div class="card__head">
+        <span class="muted" style="font-size:12px">${usingReviewerVersion ? 'Based on the reviewer’s grading' : "Model's first pass"}</span>
+      </div>
       <div class="grid-2">
         <div>
           <h3 style="margin-bottom:8px">What went well</h3>
@@ -1388,8 +1423,9 @@ function coachingReportHtml(rec, score) {
   const agentName = rec.agent?.full_name || rec.agent_name || 'Unknown agent';
   const dims = entriesOf(eff.dimensions);
   const findings = eff.findings.filter(f => !f.dismissed);
-  const strengths = Array.isArray(score.strengths) ? score.strengths : [];
-  const improvements = Array.isArray(score.improvements) ? score.improvements : [];
+  const usingReviewerVersion = score.is_overridden && Array.isArray(score.manual_strengths);
+  const strengths = usingReviewerVersion ? score.manual_strengths : (Array.isArray(score.strengths) ? score.strengths : []);
+  const improvements = usingReviewerVersion ? score.manual_improvements : (Array.isArray(score.improvements) ? score.improvements : []);
   const toneColor = tone => ({
     good: '#1b8a5a', warning: '#b8860b', serious: '#d2691e', critical: '#c0392b',
   }[tone] || '#666');
@@ -1479,7 +1515,7 @@ function coachingReportHtml(rec, score) {
 
   ${score.is_overridden ? `
   <h2>Summary of Call</h2>
-  <p>${esc(reviewerSummaryText(score))}</p>` : ''}
+  <p>${esc(score.manual_summary || reviewerSummaryText(score))}</p>` : ''}
 
   ${score.summary ? `
   <h2>${score.is_overridden ? "Model's original summary" : 'Call summary'}</h2>
