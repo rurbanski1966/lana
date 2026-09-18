@@ -664,27 +664,57 @@ export async function reviewDetail(main, ctx, recordingId) {
         </div>` : ''}`;
 
     document.getElementById('reload').addEventListener('click', draw);
-    document.getElementById('gen-report')?.addEventListener('click', () => {
-      const html = coachingReportHtml(rec, score);
-      const win = window.open('', '_blank');
-      if (win) {
-        win.document.write(html);
-        win.document.close();
-      } else {
-        toast('Report generated, but the pop-up was blocked — allow pop-ups to view it, or use the download.', 'error');
-      }
+    document.getElementById('gen-report')?.addEventListener('click', async e => {
+      const btn = e.currentTarget;
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Generating PDF…';
+      let container;
+      try {
+        await loadHtml2Pdf();
 
-      const agentSlug = (rec.agent?.full_name || rec.agent_name || 'agent')
-        .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-      const blob = new Blob([html], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `coaching-report-${agentSlug}-${rec.call_on}.html`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+        const html = coachingReportHtml(rec, score);
+        const parsed = new DOMParser().parseFromString(html, 'text/html');
+        // The style block still targets `body` — scope it to the offscreen
+        // wrapper below instead, or it would leak onto the real app body
+        // (which stays in the live document, just positioned off-screen)
+        // for the moment the snapshot is being rendered.
+        const scopedCss = (parsed.querySelector('style')?.textContent || '')
+          .replace(/\bbody\b/g, '.lana-pdf-root');
+
+        container = document.createElement('div');
+        container.className = 'lana-pdf-root';
+        container.style.cssText = 'position:fixed; left:-10000px; top:0; width:860px; background:#fff;';
+        container.innerHTML = `<style>${scopedCss}</style>${parsed.body.innerHTML}`;
+        document.body.appendChild(container);
+
+        const agentSlug = (rec.agent?.full_name || rec.agent_name || 'agent')
+          .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+        const filename = `coaching-report-${agentSlug}-${rec.call_on}.pdf`;
+
+        const pdf = await window.html2pdf()
+          .set({
+            margin: 24,
+            filename,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true },
+            jsPDF: { unit: 'pt', format: 'letter', orientation: 'portrait' },
+            pagebreak: { mode: ['css', 'legacy'] },
+          })
+          .from(container)
+          .toPdf()
+          .get('pdf');
+
+        const win = window.open(pdf.output('bloburl'), '_blank');
+        if (!win) toast('PDF generated, but the pop-up was blocked — allow pop-ups to view it, or check your downloads.', 'error');
+        pdf.save(filename);
+      } catch (err) {
+        toast(err.message || 'Could not generate the PDF.', 'error');
+      } finally {
+        container?.remove();
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
     });
     if (score && ctx.profile.role === 'admin') drawOverride(score, draw);
     if (score) drawDimensions(score, ctx, turns, draw);
@@ -1267,13 +1297,31 @@ function scoreFooterHtml(score) {
     </p>`;
 }
 
+// Loaded on demand — only someone who actually clicks "Generate report"
+// pays for it — and cached so a second click on any call reuses the same
+// <script> tag instead of injecting it again.
+let html2pdfReady = null;
+function loadHtml2Pdf() {
+  if (window.html2pdf) return Promise.resolve();
+  if (html2pdfReady) return html2pdfReady;
+  html2pdfReady = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js';
+    s.onload = () => resolve();
+    s.onerror = () => { html2pdfReady = null; reject(new Error('Could not load the PDF library — check your connection and try again.')); };
+    document.head.appendChild(s);
+  });
+  return html2pdfReady;
+}
+
 /* --- coaching report -------------------------------------------------------
-   A self-contained HTML document, not a view rendered into #main — built to
-   be opened in its own tab and downloaded, so it carries its own styles
-   rather than depending on app.css being loaded there. Only offered once a
-   call has an actual manual grade on it (score.is_overridden): the point is
-   to hand an agent the reviewer's corrected read of the call, not the
-   model's unreviewed first pass.
+   A self-contained HTML document — built as its own printable page (see
+   coachingReportHtml) and then rendered into an actual PDF via html2pdf.js
+   (loaded from cdnjs on first use), rather than depending on app.css or the
+   browser's own print-to-PDF flow. Only offered once a call has an actual
+   manual grade on it (score.is_overridden): the point is to hand an agent
+   the reviewer's corrected read of the call, not the model's unreviewed
+   first pass.
    -------------------------------------------------------------------------- */
 function coachingReportHtml(rec, score) {
   const eff = effectiveOf(score);
@@ -1305,8 +1353,6 @@ function coachingReportHtml(rec, score) {
   h1 { font-size: 22px; margin: 0 0 4px; }
   h2 { font-size: 16px; margin: 28px 0 10px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
   .muted { color: #666; font-size: 13px; }
-  .toolbar { display: flex; gap: 10px; margin-bottom: 24px; }
-  .toolbar button { font: inherit; padding: 8px 16px; border-radius: 6px; border: 1px solid #999; background: #f3f3f3; cursor: pointer; }
   .kpis { display: flex; gap: 16px; flex-wrap: wrap; margin: 16px 0; }
   .kpi { border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px; min-width: 140px; }
   .kpi .lbl { font-size: 12px; color: #666; }
@@ -1317,7 +1363,6 @@ function coachingReportHtml(rec, score) {
   blockquote { margin: 6px 0 0; padding-left: 10px; border-left: 3px solid #ccc; font-size: 12px; color: #444; font-style: italic; }
   .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; color: #fff; font-size: 12px; font-weight: 600; }
   ul { margin: 6px 0; padding-left: 20px; }
-  @media print { .toolbar { display: none; } body { padding: 0 8px; } }
 </style>
 </head>
 <body>
@@ -1331,10 +1376,6 @@ function coachingReportHtml(rec, score) {
       <span class="lana-word"><span class="lana-l">L</span>ANA</span>
     </div>
     <div class="lana-tagline">AI Sales Coaching &amp; Scoring</div>
-  </div>
-
-  <div class="toolbar">
-    <button onclick="window.print()">Print / Save as PDF</button>
   </div>
 
   <h1>Coaching report</h1>

@@ -255,8 +255,15 @@ code {
   gap: 22px;
 }
 /* --- Brand lockup -------------------------------------------------------- */
-/* The <svg> inherits `color` for its tile fill, so one token drives the mark
-   in both themes and the stroke stays readable against it either way. */
+.lockup-wrap { display: flex; flex-direction: column; gap: 5px; }
+.lockup__tagline {
+  font-family: 'Manrope', var(--sans);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
 .lockup {
   display: flex;
   align-items: center;

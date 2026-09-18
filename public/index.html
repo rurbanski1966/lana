@@ -124,13 +124,16 @@
   <!-- App shell -->
   <div id="shell" class="shell" hidden>
     <aside class="sidebar">
-      <div class="lockup">
-        <svg class="mark" viewBox="0 0 32 32" role="img" aria-label="Lana">
-          <rect width="32" height="32" rx="7" fill="#3B1370"/>
-          <text x="16" y="17" text-anchor="middle" dominant-baseline="central"
-                font-family="Manrope, system-ui, sans-serif" font-weight="800" font-size="19" fill="#E4D4FF">L</text>
-        </svg>
-        <span class="lockup__word"><span class="lockup__l">L</span>ANA</span>
+      <div class="lockup-wrap">
+        <div class="lockup">
+          <svg class="mark" viewBox="0 0 32 32" role="img" aria-label="Lana">
+            <rect width="32" height="32" rx="7" fill="#3B1370"/>
+            <text x="16" y="17" text-anchor="middle" dominant-baseline="central"
+                  font-family="Manrope, system-ui, sans-serif" font-weight="800" font-size="19" fill="#E4D4FF">L</text>
+          </svg>
+          <span class="lockup__word"><span class="lockup__l">L</span>ANA</span>
+        </div>
+        <div class="lockup__tagline">AI Sales Coaching &amp; Scoring</div>
       </div>
 
       <nav class="nav" id="nav" aria-label="Main"></nav>
@@ -150,6 +153,6 @@
 
   <div class="toaster" id="toaster" aria-live="polite"></div>
 
-  <script type="module" src="./js/app.js?v=26"></script>
+  <script type="module" src="./js/app.js?v=27"></script>
 </body>
 </html>
