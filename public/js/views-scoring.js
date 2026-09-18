@@ -610,6 +610,7 @@ export async function reviewDetail(main, ctx, recordingId) {
                  ${score ? 'Re-score call' : 'Score call'}
                </button>` : ''}
           <button class="btn btn--ghost" id="reload">Reload</button>
+          ${score?.is_overridden ? `<button class="btn btn--ghost" id="gen-report" type="button">Generate report</button>` : ''}
         </div>
         <div id="player" style="margin-top:14px"></div>
         ${!rec.transcript ? `
@@ -663,6 +664,28 @@ export async function reviewDetail(main, ctx, recordingId) {
         </div>` : ''}`;
 
     document.getElementById('reload').addEventListener('click', draw);
+    document.getElementById('gen-report')?.addEventListener('click', () => {
+      const html = coachingReportHtml(rec, score);
+      const win = window.open('', '_blank');
+      if (win) {
+        win.document.write(html);
+        win.document.close();
+      } else {
+        toast('Report generated, but the pop-up was blocked — allow pop-ups to view it, or use the download.', 'error');
+      }
+
+      const agentSlug = (rec.agent?.full_name || rec.agent_name || 'agent')
+        .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `coaching-report-${agentSlug}-${rec.call_on}.html`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
     if (score && ctx.profile.role === 'admin') drawOverride(score, draw);
     if (score) drawDimensions(score, ctx, turns, draw);
     if (score) drawFindings(score, ctx, turns, draw);
@@ -1242,6 +1265,147 @@ function scoreFooterHtml(score) {
       Scores are model-generated and meant for coaching, not for discipline or
       compliance sign-off. Read the evidence quotes before acting on a finding.
     </p>`;
+}
+
+/* --- coaching report -------------------------------------------------------
+   A self-contained HTML document, not a view rendered into #main — built to
+   be opened in its own tab and downloaded, so it carries its own styles
+   rather than depending on app.css being loaded there. Only offered once a
+   call has an actual manual grade on it (score.is_overridden): the point is
+   to hand an agent the reviewer's corrected read of the call, not the
+   model's unreviewed first pass.
+   -------------------------------------------------------------------------- */
+function coachingReportHtml(rec, score) {
+  const eff = effectiveOf(score);
+  const agentName = rec.agent?.full_name || rec.agent_name || 'Unknown agent';
+  const dims = entriesOf(eff.dimensions);
+  const findings = eff.findings.filter(f => !f.dismissed);
+  const strengths = Array.isArray(score.strengths) ? score.strengths : [];
+  const improvements = Array.isArray(score.improvements) ? score.improvements : [];
+  const toneColor = tone => ({
+    good: '#1b8a5a', warning: '#b8860b', serious: '#d2691e', critical: '#c0392b',
+  }[tone] || '#666');
+  const sevMeta = sev => FINDING_SEVERITIES.find(s => s.value === sev) || { label: sev, tone: 'warning' };
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Coaching report - ${esc(agentName)} - ${esc(fmtDate(rec.call_on))}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; max-width: 860px; margin: 0 auto; padding: 32px 24px 60px; color: #1a1a1a; background: #fff; line-height: 1.5; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 28px 0 10px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
+  .muted { color: #666; font-size: 13px; }
+  .toolbar { display: flex; gap: 10px; margin-bottom: 24px; }
+  .toolbar button { font: inherit; padding: 8px 16px; border-radius: 6px; border: 1px solid #999; background: #f3f3f3; cursor: pointer; }
+  .kpis { display: flex; gap: 16px; flex-wrap: wrap; margin: 16px 0; }
+  .kpi { border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px; min-width: 140px; }
+  .kpi .lbl { font-size: 12px; color: #666; }
+  .kpi .val { font-size: 24px; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 20px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e5e5e5; vertical-align: top; font-size: 13px; }
+  th { color: #666; font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  blockquote { margin: 6px 0 0; padding-left: 10px; border-left: 3px solid #ccc; font-size: 12px; color: #444; font-style: italic; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; color: #fff; font-size: 12px; font-weight: 600; }
+  ul { margin: 6px 0; padding-left: 20px; }
+  @media print { .toolbar { display: none; } body { padding: 0 8px; } }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <button onclick="window.print()">Print / Save as PDF</button>
+  </div>
+
+  <h1>Coaching report</h1>
+  <p class="muted">
+    ${esc(agentName)} - ${esc(fmtDate(rec.call_on))}${rec.title ? ` - ${esc(rec.title)}` : ''}
+    ${rec.call_type ? ` - ${esc(CALL_TYPES.find(t => t.value === rec.call_type)?.label || rec.call_type)}` : ''}
+    ${rec.team?.name ? ` - Agency Assigned: ${esc(rec.team.name)}` : ''}
+    ${rec.script?.name ? ` - Script: ${esc(rec.script.name)}` : ''}
+  </p>
+  <p class="muted">
+    Reviewed by ${esc(score.overridden_by_profile?.full_name || 'an admin')}
+    ${score.overridden_at ? `- ${esc(fmtDate(score.overridden_at))}` : ''}
+  </p>
+
+  <div class="kpis">
+    <div class="kpi">
+      <div class="lbl">Overall score</div>
+      <div class="val">${esc(eff.overall_score)}</div>
+      <div class="muted">Model originally scored ${esc(score.overall_score)}</div>
+    </div>
+    <div class="kpi">
+      <div class="lbl">Compliance</div>
+      <div class="val">${eff.compliance_passed ? 'Pass' : 'Fail'}</div>
+      <div class="muted">Model originally said ${score.compliance_passed ? 'pass' : 'fail'}</div>
+    </div>
+  </div>
+
+  ${score.manual_notes ? `
+  <h2>Reviewer notes</h2>
+  <p>${esc(score.manual_notes)}</p>` : ''}
+
+  ${score.summary ? `
+  <h2>Call summary</h2>
+  <p>${esc(score.summary)}</p>` : ''}
+
+  <h2>By dimension</h2>
+  <table>
+    <thead><tr><th>Dimension</th><th>Score</th><th>Notes</th></tr></thead>
+    <tbody>
+      ${dims.map(([key, v]) => {
+        const modelScore = Number(score.dimensions?.[key]?.score) || 0;
+        const n = Number(v.score) || 0;
+        return `<tr>
+          <td>${esc(dimLabel(key, v))}</td>
+          <td>${n}${n !== modelScore ? ` <span class="muted">(model said ${modelScore})</span>` : ''}</td>
+          <td>${esc(v.rationale || '')}
+            ${v.evidence ? `<blockquote>"${esc(v.evidence)}"</blockquote>` : ''}
+            ${v.reason ? `<div class="muted" style="margin-top:4px">Reviewer note: ${esc(v.reason)}</div>` : ''}
+          </td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>
+
+  <h2>Compliance findings</h2>
+  ${findings.length === 0 ? '<p class="muted">No compliance issues found.</p>' : `
+  <table>
+    <thead><tr><th>Issue</th><th>Severity</th><th>Detail</th></tr></thead>
+    <tbody>
+      ${findings.map(f => {
+        const sev = sevMeta(f.severity);
+        return `<tr>
+          <td>${esc(FINDING_CODES[f.code] || f.code)}</td>
+          <td><span class="pill" style="background:${toneColor(sev.tone)}">${esc(sev.label)}</span></td>
+          <td>${esc(f.detail || '')}
+            ${f.evidence ? `<blockquote>"${esc(f.evidence)}"</blockquote>` : ''}
+            ${f.reason ? `<div class="muted" style="margin-top:4px">Reviewer note: ${esc(f.reason)}</div>` : ''}
+          </td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`}
+
+  <h2>Coaching focus</h2>
+  <div style="display:flex;gap:24px;flex-wrap:wrap">
+    <div style="flex:1;min-width:240px">
+      <strong>What went well</strong>
+      ${strengths.length === 0 ? '<p class="muted">-</p>' : `<ul>${strengths.map(s => `<li>${esc(s)}</li>`).join('')}</ul>`}
+    </div>
+    <div style="flex:1;min-width:240px">
+      <strong>What to work on</strong>
+      ${improvements.length === 0 ? '<p class="muted">-</p>' : `<ul>${improvements.map(s => `<li>${esc(s)}</li>`).join('')}</ul>`}
+    </div>
+  </div>
+
+  <p class="muted" style="margin-top:30px">
+    Generated ${esc(fmtDate(new Date().toISOString()))} - For coaching use, not a disciplinary or compliance record.
+  </p>
+</body>
+</html>`;
 }
 
 /* === Calibration ==========================================================
