@@ -669,7 +669,7 @@ export async function reviewDetail(main, ctx, recordingId) {
       const originalText = btn.textContent;
       btn.disabled = true;
       btn.textContent = 'Generating PDF…';
-      let clip;
+      let container;
       try {
         await loadHtml2Pdf();
 
@@ -680,21 +680,18 @@ export async function reviewDetail(main, ctx, recordingId) {
         const scopedCss = (parsed.querySelector('style')?.textContent || '')
           .replace(/\bbody\b/g, '.lana-pdf-root');
 
-        // html2canvas captures the page's actual viewport, not an arbitrary
-        // element wherever it sits — a container pushed off-screen with a
-        // negative position (the first version of this) renders as a blank
-        // canvas because there's nothing at that location to capture. This
-        // container stays in normal document flow at (0,0), fully laid out
-        // with real dimensions; `clip` (zero height, overflow hidden) is
-        // what actually keeps it from flashing on screen.
-        clip = document.createElement('div');
-        clip.style.cssText = 'height:0; overflow:hidden;';
-        const container = document.createElement('div');
+        // html2canvas only captures pixels the browser actually paints —
+        // position:fixed with a large negative offset (attempt 1) and an
+        // overflow:hidden ancestor (attempt 2) both prevent that, so every
+        // render came back blank either way. Plain normal-flow, appended
+        // last, is the reliable option: nothing else on the page moves or
+        // scrolls to it, so it's never actually seen, and it's gone again
+        // by the time the click handler returns.
+        container = document.createElement('div');
         container.className = 'lana-pdf-root';
         container.style.cssText = 'width:860px; background:#fff;';
         container.innerHTML = `<style>${scopedCss}</style>${parsed.body.innerHTML}`;
-        clip.appendChild(container);
-        document.body.appendChild(clip);
+        document.body.appendChild(container);
 
         const agentSlug = (rec.agent?.full_name || rec.agent_name || 'agent')
           .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -719,7 +716,7 @@ export async function reviewDetail(main, ctx, recordingId) {
       } catch (err) {
         toast(err.message || 'Could not generate the PDF.', 'error');
       } finally {
-        clip?.remove();
+        container?.remove();
         btn.disabled = false;
         btn.textContent = originalText;
       }
