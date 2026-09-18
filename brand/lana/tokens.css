@@ -1,0 +1,14 @@
+:root {
+  /* LANA brand palette */
+  --lana-purple-deep:      #3B1370; /* icon badge background */
+  --lana-purple-badge-fg:  #E4D4FF; /* L inside the badge */
+  --lana-purple-accent-lt: #7C2FD6; /* L in wordmark, light bg */
+  --lana-purple-accent-dk: #B98CFF; /* L in wordmark, dark bg */
+  --lana-ink-light:        #1E1029; /* "ANA" text on light bg */
+  --lana-ink-dark:         #F8F6FC; /* "ANA" text on dark bg */
+  --lana-bg-light:         #F8F6FC;
+  --lana-bg-dark:          #1A0E2E;
+  --lana-tagline-light:    #8B7FA0;
+  --lana-tagline-dark:     #A296B8;
+  --lana-font: 'Manrope', system-ui, sans-serif;
+}

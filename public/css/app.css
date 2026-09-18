@@ -51,6 +51,9 @@
 
   --radius: 10px;
   --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* LANA wordmark — fixed brand palette, not derived from --brand */
+  --lana-accent: #B98CFF; /* "L" in the wordmark, dark surfaces */
 }
 
 :root[data-theme='light'] {
@@ -58,6 +61,8 @@
 
   --brand:     #4a3aa7;  /* OKLab L 0.433 — below the light series band (0.575) */
   --brand-ink: #ffffff;  /* 8.6:1 */
+
+  --lana-accent: #7C2FD6; /* "L" in the wordmark, light surfaces */
 
   --plane:        #f9f9f7;
   --surface-1:    #fcfcfb;
@@ -256,15 +261,16 @@ code {
   display: flex;
   align-items: center;
   gap: 9px;
-  color: var(--brand);
 }
 .lockup .mark { width: 22px; height: 22px; flex: none; display: block; }
 .lockup__word {
+  font-family: 'Manrope', var(--sans);
   font-size: 17px;
-  font-weight: 650;
-  letter-spacing: -0.015em;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   color: var(--text-primary);
 }
+.lockup__l { color: var(--lana-accent); }
 
 .lockup--lg { flex-direction: column; gap: 12px; margin-bottom: 4px; }
 .lockup--lg .mark { width: 40px; height: 40px; }
