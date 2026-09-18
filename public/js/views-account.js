@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // Account: the one page every role can reach, for managing your own login.
 // ---------------------------------------------------------------------------
-import * as db from './db.js?v=33';
-import { esc, toast } from './ui.js?v=33';
+import * as db from './db.js?v=34';
+import { esc, toast } from './ui.js?v=34';
 
 export async function account(main, ctx) {
   main.innerHTML = `

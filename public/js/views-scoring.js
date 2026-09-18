@@ -5,12 +5,12 @@
 // and asks an Edge Function to score — the Anthropic key never reaches the
 // client.
 // ---------------------------------------------------------------------------
-import * as db from './db.js?v=33';
-import { SCORE_DIMENSIONS, FINDING_CODES, FINDING_SEVERITIES, RECORDING_STATUSES, CALL_TYPES } from './config.js?v=33';
+import * as db from './db.js?v=34';
+import { SCORE_DIMENSIONS, FINDING_CODES, FINDING_SEVERITIES, RECORDING_STATUSES, CALL_TYPES } from './config.js?v=34';
 import {
   esc, fmtNum, fmtDate, fmtMoneyExact, today, range, RANGES,
   toast, statTile, barRow, empty, spinner, selectField,
-} from './ui.js?v=33';
+} from './ui.js?v=34';
 
 /* --- helpers ------------------------------------------------------------- */
 
@@ -1174,37 +1174,52 @@ const sevLabel = v => FINDING_SEVERITIES.find(s => s.value === v)?.label || v;
 // The model's summary describes the call it originally graded — once a
 // reviewer changes scores or findings, that text can read as flatly wrong
 // (it might say "no compliance issues" after a Critical finding was added,
-// or vice versa). Rather than editing the model's own words, or asking the
-// reviewer to write a new summary from scratch, this lists exactly what the
-// reviewer changed — mechanically, from the same scores and reasons already
-// captured on each Manual review save, so it can never drift from what the
-// overrides actually say. Per Ryan 2026-09-17: just the manual changes
-// themselves, not a comparison against the model's original numbers — that
-// comparison is already available on each dimension/finding's own row.
-function reviewerChanges(score) {
-  if (!score.is_overridden) return [];
+// or vice versa). Per Ryan 2026-09-18: a 4-5 sentence narrative of what the
+// agent did and needs to work on, built from the reviewer's own words —
+// every dimension/finding reason typed on a Manual review save, sorted into
+// "did well" (the reviewer scored it better than the model did) and "needs
+// work" (the reviewer scored it worse), plus manual_notes. This can never
+// invent anything the reviewer didn't actually write; if a reason field was
+// left thin, the paragraph comes out short rather than padded with filler.
+function reviewerSummaryText(score) {
+  if (!score.is_overridden) return '';
   const eff = effectiveOf(score);
-  const changes = [];
 
-  const dimChanges = entriesOf(eff.dimensions)
-    .filter(([key, v]) => Number(v.score) !== (Number(score.dimensions?.[key]?.score) || 0))
-    .map(([key, v]) => `${dimLabel(key, v)}: ${v.score}${v.reason ? ` — ${v.reason}` : ''}`);
-  changes.push(...dimChanges);
-
-  const modelFindingByCode = new Map((score.findings || []).map(f => [f.code, f]));
-  const findingChanges = eff.findings
-    .map(f => {
-      const before = modelFindingByCode.get(f.code);
-      if (!before || before.severity === f.severity) return null;
-      return `${FINDING_CODES[f.code] || f.code}: ${sevLabel(f.severity)}${f.reason ? ` — ${f.reason}` : ''}`;
+  const dimReasons = entriesOf(eff.dimensions)
+    .map(([key, v]) => {
+      const before = Number(score.dimensions?.[key]?.score) || 0;
+      const after = Number(v.score) || 0;
+      if (after === before || !v.reason) return null;
+      return { reason: v.reason, better: after > before };
     })
     .filter(Boolean);
-  changes.push(...findingChanges);
 
-  if (score.manual_notes) changes.push(score.manual_notes);
-  if (changes.length === 0) changes.push('Reviewed and confirmed — no changes made.');
+  const modelFindingByCode = new Map((score.findings || []).map(f => [f.code, f]));
+  const findingReasons = eff.findings
+    .map(f => {
+      const before = modelFindingByCode.get(f.code);
+      if (!before || before.severity === f.severity || !f.reason) return null;
+      const better = (SEVERITY_RANK[f.severity] ?? 0) < (SEVERITY_RANK[before.severity] ?? 0);
+      return { reason: f.reason, better };
+    })
+    .filter(Boolean);
 
-  return changes;
+  const strengths = [...dimReasons, ...findingReasons].filter(c => c.better).map(c => c.reason);
+  const improvements = [...dimReasons, ...findingReasons].filter(c => !c.better).map(c => c.reason);
+
+  const band = eff.overall_score >= 80 ? 'good' : eff.overall_score >= 70 ? 'needs review' : 'critical';
+  const sentences = [
+    `After manual review, this call scored ${eff.overall_score}/100 (${band}) with compliance ${eff.compliance_passed ? 'passed' : 'failed'}.`,
+  ];
+  if (strengths.length) sentences.push(`What the agent did well: ${strengths.join('; ')}.`);
+  if (improvements.length) sentences.push(`What the agent needs to work on: ${improvements.join('; ')}.`);
+  if (score.manual_notes) sentences.push(score.manual_notes);
+  if (!strengths.length && !improvements.length && !score.manual_notes) {
+    sentences.push('The reviewer confirmed this grade with no specific notes recorded.');
+  }
+  sentences.push('Use this feedback to guide the agent’s coaching before their next call.');
+
+  return sentences.join(' ');
 }
 
 /* --- finding score <-> severity ------------------------------------------
@@ -1279,9 +1294,7 @@ function scoreHeaderHtml(score) {
           By ${esc(score.overridden_by_profile?.full_name || 'an admin')}
           ${score.overridden_at ? `· ${esc(fmtDate(score.overridden_at))}` : ''}
         </p>
-        <ul style="margin:10px 0 0;padding-left:18px">
-          ${reviewerChanges(score).map(c => `<li>${esc(c)}</li>`).join('')}
-        </ul>
+        <p style="margin:10px 0 0">${esc(reviewerSummaryText(score))}</p>
       </div>` : ''}
 
     <div class="kpis">
@@ -1466,7 +1479,7 @@ function coachingReportHtml(rec, score) {
 
   ${score.is_overridden ? `
   <h2>Summary of Call</h2>
-  <ul>${reviewerChanges(score).map(c => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}
+  <p>${esc(reviewerSummaryText(score))}</p>` : ''}
 
   ${score.summary ? `
   <h2>${score.is_overridden ? "Model's original summary" : 'Call summary'}</h2>
