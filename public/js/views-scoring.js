@@ -1292,9 +1292,16 @@ function coachingReportHtml(rec, score) {
 <head>
 <meta charset="utf-8">
 <title>Coaching report - ${esc(agentName)} - ${esc(fmtDate(rec.call_on))}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;800&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; }
   body { font-family: -apple-system, Segoe UI, Arial, sans-serif; max-width: 860px; margin: 0 auto; padding: 32px 24px 60px; color: #1a1a1a; background: #fff; line-height: 1.5; }
+  .lana-header { display: flex; flex-direction: column; gap: 6px; margin-bottom: 24px; }
+  .lana-lockup { display: flex; align-items: center; gap: 8px; }
+  .lana-word { font-family: 'Manrope', -apple-system, Segoe UI, Arial, sans-serif; font-weight: 800; font-size: 22px; letter-spacing: -0.02em; color: #1E1029; }
+  .lana-l { color: #7C2FD6; }
+  .lana-tagline { font-family: 'Manrope', -apple-system, Segoe UI, Arial, sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: #8B7FA0; }
   h1 { font-size: 22px; margin: 0 0 4px; }
   h2 { font-size: 16px; margin: 28px 0 10px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
   .muted { color: #666; font-size: 13px; }
@@ -1314,6 +1321,18 @@ function coachingReportHtml(rec, score) {
 </style>
 </head>
 <body>
+  <div class="lana-header">
+    <div class="lana-lockup">
+      <svg width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="Lana">
+        <rect width="32" height="32" rx="7" fill="#3B1370"/>
+        <text x="16" y="17" text-anchor="middle" dominant-baseline="central"
+              font-family="Manrope, -apple-system, Segoe UI, Arial, sans-serif" font-weight="800" font-size="19" fill="#E4D4FF">L</text>
+      </svg>
+      <span class="lana-word"><span class="lana-l">L</span>ANA</span>
+    </div>
+    <div class="lana-tagline">AI Sales Coaching &amp; Scoring</div>
+  </div>
+
   <div class="toolbar">
     <button onclick="window.print()">Print / Save as PDF</button>
   </div>
