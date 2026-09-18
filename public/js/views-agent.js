@@ -2,12 +2,12 @@
 // Agent-facing views: dashboard, my sales.
 // Every view exports render(main, ctx) and wires its own listeners.
 // ---------------------------------------------------------------------------
-import * as db from './db.js?v=36';
-import { CATEGORIES } from './config.js?v=36';
+import * as db from './db.js?v=37';
+import { CATEGORIES } from './config.js?v=37';
 import {
   esc, fmtMoney, fmtMoneyExact, fmtNum, fmtDate,
   toast, statTile, statusChip, empty, spinner,
-} from './ui.js?v=36';
+} from './ui.js?v=37';
 
 const SERIES = {
   mapd:      'var(--series-1)',
@@ -31,14 +31,6 @@ export async function dashboard(main, ctx) {
 
   const target = Number(m.target_ap) || 0;
   const monthAp = Number(m.month_ap) || 0;
-  const pace = Number(m.pace) || 0;
-
-  // Pace projects month-end from business days elapsed. Showing the divisor
-  // matters: early in a month a single sale projects to an absurd number, and
-  // "2 of 21 selling days" is what stops that being read as a forecast.
-  const paceNote = m.days_elapsed > 0
-    ? `${fmtNum(m.days_elapsed)} of ${fmtNum(m.days_in_month)} selling days elapsed`
-    : 'Month has not started';
 
   let targetNote = 'No monthly target set';
   if (target > 0) {
@@ -53,7 +45,7 @@ export async function dashboard(main, ctx) {
     <div class="kpis" id="kpis">
       ${statTile({ label: 'Daily spend', value: fmtMoneyExact(m.daily_spend), note: "AI grading cost, today's calls" })}
       ${statTile({ label: 'Weekly spend', value: fmtMoneyExact(m.weekly_spend), note: 'AI grading cost, Monday–Sunday' })}
-      ${statTile({ label: 'Pace', value: fmtMoney(pace), note: paceNote })}
+      ${statTile({ label: 'Monthly spend', value: fmtMoneyExact(m.monthly_spend), note: 'AI grading + review costs, this month' })}
       ${statTile({ label: 'To target', value: target > 0 ? fmtMoney(Math.max(0, target - monthAp)) : '—', note: targetNote })}
     </div>`;
 
