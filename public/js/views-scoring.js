@@ -669,24 +669,32 @@ export async function reviewDetail(main, ctx, recordingId) {
       const originalText = btn.textContent;
       btn.disabled = true;
       btn.textContent = 'Generating PDF…';
-      let container;
+      let clip;
       try {
         await loadHtml2Pdf();
 
         const html = coachingReportHtml(rec, score);
         const parsed = new DOMParser().parseFromString(html, 'text/html');
-        // The style block still targets `body` — scope it to the offscreen
-        // wrapper below instead, or it would leak onto the real app body
-        // (which stays in the live document, just positioned off-screen)
-        // for the moment the snapshot is being rendered.
+        // The style block still targets `body` — scope it to the render
+        // container below instead, or it would leak onto the real app body.
         const scopedCss = (parsed.querySelector('style')?.textContent || '')
           .replace(/\bbody\b/g, '.lana-pdf-root');
 
-        container = document.createElement('div');
+        // html2canvas captures the page's actual viewport, not an arbitrary
+        // element wherever it sits — a container pushed off-screen with a
+        // negative position (the first version of this) renders as a blank
+        // canvas because there's nothing at that location to capture. This
+        // container stays in normal document flow at (0,0), fully laid out
+        // with real dimensions; `clip` (zero height, overflow hidden) is
+        // what actually keeps it from flashing on screen.
+        clip = document.createElement('div');
+        clip.style.cssText = 'height:0; overflow:hidden;';
+        const container = document.createElement('div');
         container.className = 'lana-pdf-root';
-        container.style.cssText = 'position:fixed; left:-10000px; top:0; width:860px; background:#fff;';
+        container.style.cssText = 'width:860px; background:#fff;';
         container.innerHTML = `<style>${scopedCss}</style>${parsed.body.innerHTML}`;
-        document.body.appendChild(container);
+        clip.appendChild(container);
+        document.body.appendChild(clip);
 
         const agentSlug = (rec.agent?.full_name || rec.agent_name || 'agent')
           .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -711,7 +719,7 @@ export async function reviewDetail(main, ctx, recordingId) {
       } catch (err) {
         toast(err.message || 'Could not generate the PDF.', 'error');
       } finally {
-        container?.remove();
+        clip?.remove();
         btn.disabled = false;
         btn.textContent = originalText;
       }
