@@ -5,12 +5,12 @@
 // and asks an Edge Function to score — the Anthropic key never reaches the
 // client.
 // ---------------------------------------------------------------------------
-import * as db from './db.js?v=35';
-import { SCORE_DIMENSIONS, FINDING_CODES, FINDING_SEVERITIES, RECORDING_STATUSES, CALL_TYPES } from './config.js?v=35';
+import * as db from './db.js?v=36';
+import { SCORE_DIMENSIONS, FINDING_CODES, FINDING_SEVERITIES, RECORDING_STATUSES, CALL_TYPES } from './config.js?v=36';
 import {
   esc, fmtNum, fmtDate, fmtMoneyExact, today, range, RANGES,
   toast, statTile, barRow, empty, spinner, selectField,
-} from './ui.js?v=35';
+} from './ui.js?v=36';
 
 /* --- helpers ------------------------------------------------------------- */
 
@@ -670,6 +670,7 @@ export async function reviewDetail(main, ctx, recordingId) {
       btn.disabled = true;
       btn.textContent = 'Generating PDF…';
       let container;
+      let summaryUpdated = false;
       try {
         if (score?.is_overridden) {
           btn.textContent = 'Summarizing review…';
@@ -680,6 +681,10 @@ export async function reviewDetail(main, ctx, recordingId) {
               manual_strengths: result.strengths,
               manual_improvements: result.improvements,
             });
+            // Only a fresh generation changes anything worth a redraw for —
+            // a cache hit returns the same text and cost that's already on
+            // the page.
+            summaryUpdated = !result.cached;
           } catch (err) {
             toast(`Could not refresh the AI summary, using the existing one: ${err.message}`, 'error');
           }
@@ -734,6 +739,11 @@ export async function reviewDetail(main, ctx, recordingId) {
         container?.remove();
         btn.disabled = false;
         btn.textContent = originalText;
+        // Refreshes Cost to score and the Summary of Call banner with the
+        // newly generated text/cost — the local `score` object was already
+        // updated above for the PDF itself, but the rest of the page (drawn
+        // before this ran) still shows the old figures until this redraws.
+        if (summaryUpdated) draw();
       }
     });
     if (score && ctx.profile.role === 'admin') drawOverride(score, draw);
@@ -1344,8 +1354,16 @@ function scoreHeaderHtml(score) {
       })}
       ${statTile({
         label: 'Cost to score',
-        value: fmtMoneyExact(score.cost_usd),
-        note: `${fmtNum(score.input_tokens)} in · ${fmtNum(score.output_tokens)} out · ${fmtNum(score.cache_read_tokens)} cached`,
+        // Includes the AI summary's cost once summarize-review has run —
+        // that's a real Anthropic charge tied to this call, so it belongs
+        // in the figure shown here. Deliberately NOT folded into cost_usd
+        // itself or into spend_summary()/my_metrics(): those aggregate by
+        // the day a call was SCORED, and a summary generated days later
+        // would misattribute its cost to the wrong day there.
+        value: fmtMoneyExact(Number(score.cost_usd || 0) + Number(score.manual_summary_cost_usd || 0)),
+        note: score.manual_summary_cost_usd
+          ? `${fmtNum(score.input_tokens)} in · ${fmtNum(score.output_tokens)} out · ${fmtNum(score.cache_read_tokens)} cached + ${fmtMoneyExact(score.manual_summary_cost_usd)} AI summary`
+          : `${fmtNum(score.input_tokens)} in · ${fmtNum(score.output_tokens)} out · ${fmtNum(score.cache_read_tokens)} cached`,
       })}
     </div>
 
