@@ -1,12 +1,12 @@
 // ---------------------------------------------------------------------------
 // Boot, auth gate, hash router, nav.
 // ---------------------------------------------------------------------------
-import { isConfigured, SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=32';
-import { toast, esc } from './ui.js?v=32';
+import { isConfigured, SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=33';
+import { toast, esc } from './ui.js?v=33';
 
 // Bump when debugging a stale-cache problem: if the browser doesn't show this
 // exact string, it is running old code and nothing else you observe is real.
-const BUILD = 'build-32';
+const BUILD = 'build-33';
 
 const el = id => document.getElementById(id);
 
@@ -39,12 +39,12 @@ if (!isConfigured()) {
 
 console.info(`Lana ${BUILD} — config loaded, URL ${SUPABASE_URL}`);
 
-const db = await import('./db.js?v=32');
-const agentViews = await import('./views-agent.js?v=32');
-const adminViews = await import('./views-admin.js?v=32');
-const scoringViews = await import('./views-scoring.js?v=32');
-const rubricViews = await import('./views-rubric.js?v=32');
-const accountViews = await import('./views-account.js?v=32');
+const db = await import('./db.js?v=33');
+const agentViews = await import('./views-agent.js?v=33');
+const adminViews = await import('./views-admin.js?v=33');
+const scoringViews = await import('./views-scoring.js?v=33');
+const rubricViews = await import('./views-rubric.js?v=33');
+const accountViews = await import('./views-account.js?v=33');
 
 const ctx = { profile: null };
 
