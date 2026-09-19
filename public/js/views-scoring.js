@@ -5,12 +5,12 @@
 // and asks an Edge Function to score — the Anthropic key never reaches the
 // client.
 // ---------------------------------------------------------------------------
-import * as db from './db.js?v=38';
-import { SCORE_DIMENSIONS, FINDING_CODES, FINDING_SEVERITIES, RECORDING_STATUSES, CALL_TYPES } from './config.js?v=38';
+import * as db from './db.js?v=39';
+import { SCORE_DIMENSIONS, FINDING_CODES, FINDING_SEVERITIES, RECORDING_STATUSES, CALL_TYPES } from './config.js?v=39';
 import {
   esc, fmtNum, fmtDate, fmtMoneyExact, today, range, RANGES,
   toast, statTile, barRow, empty, spinner, selectField,
-} from './ui.js?v=38';
+} from './ui.js?v=39';
 
 /* --- helpers ------------------------------------------------------------- */
 
@@ -1460,7 +1460,7 @@ function coachingReportHtml(rec, score) {
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;800&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; max-width: 860px; margin: 0 auto; padding: 32px 24px 60px; color: #1a1a1a; background: #fff; line-height: 1.5; }
+  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; font-size: 13px; max-width: 860px; margin: 0 auto; padding: 32px 28px 60px 24px; color: #1a1a1a; background: #fff; line-height: 1.5; overflow-wrap: break-word; }
   .lana-header { display: flex; flex-direction: column; gap: 6px; margin-bottom: 24px; }
   .lana-lockup { display: flex; align-items: center; gap: 8px; }
   .lana-word { font-family: 'Manrope', -apple-system, Segoe UI, Arial, sans-serif; font-weight: 800; font-size: 22px; letter-spacing: -0.02em; color: #1E1029; }
@@ -1481,10 +1481,16 @@ function coachingReportHtml(rec, score) {
   .kpi--warn .val { color: #8a6508; }
   .kpi--bad  { background: #fdeceb; border-color: #c0392b; }
   .kpi--bad  .val { color: #96281d; }
-  table { width: 100%; border-collapse: collapse; margin: 8px 0 20px; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e5e5e5; vertical-align: top; font-size: 13px; }
+  table { width: 100%; table-layout: fixed; border-collapse: collapse; margin: 8px 0 20px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e5e5e5; vertical-align: top; font-size: 13px; overflow-wrap: break-word; word-break: break-word; }
   th { color: #666; font-weight: 600; font-size: 12px; text-transform: uppercase; }
-  blockquote { margin: 6px 0 0; padding-left: 10px; border-left: 3px solid #ccc; font-size: 12px; color: #444; font-style: italic; }
+  /* Fixed layout needs explicit widths or it splits 3 columns evenly, starving
+     the long text column and forcing the short label columns wider than the
+     content needs — that's what let a long word push the table past the
+     container's edge and get clipped by html2canvas on the right. */
+  th:nth-child(1), td:nth-child(1) { width: 22%; }
+  th:nth-child(2), td:nth-child(2) { width: 14%; }
+  blockquote { margin: 6px 0 0; padding-left: 10px; border-left: 3px solid #ccc; font-size: 12px; color: #444; font-style: italic; overflow-wrap: break-word; word-break: break-word; }
   .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; color: #fff; font-size: 12px; font-weight: 600; }
   ul { margin: 6px 0; padding-left: 20px; }
   /* Keep a row/box/quote whole across a page boundary instead of splitting
