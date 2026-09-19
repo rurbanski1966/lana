@@ -2,12 +2,12 @@
 // Agent-facing views: dashboard, my sales.
 // Every view exports render(main, ctx) and wires its own listeners.
 // ---------------------------------------------------------------------------
-import * as db from './db.js?v=37';
-import { CATEGORIES } from './config.js?v=37';
+import * as db from './db.js?v=38';
+import { CATEGORIES } from './config.js?v=38';
 import {
-  esc, fmtMoney, fmtMoneyExact, fmtNum, fmtDate,
+  esc, fmtMoneyExact, fmtNum, fmtDate,
   toast, statTile, statusChip, empty, spinner,
-} from './ui.js?v=37';
+} from './ui.js?v=38';
 
 const SERIES = {
   mapd:      'var(--series-1)',
@@ -29,24 +29,12 @@ export async function dashboard(main, ctx) {
 
   const [m, mine] = await Promise.all([db.myMetrics(), db.mySubmissions({ limit: 8 })]);
 
-  const target = Number(m.target_ap) || 0;
-  const monthAp = Number(m.month_ap) || 0;
-
-  let targetNote = 'No monthly target set';
-  if (target > 0) {
-    const pct = (monthAp / target) * 100;
-    const gap = target - monthAp;
-    targetNote = gap > 0
-      ? `${fmtMoney(gap)} to go · ${Math.round(pct)}% of ${fmtMoney(target)}`
-      : `Target met · ${Math.round(pct)}% of ${fmtMoney(target)}`;
-  }
-
   document.getElementById('kpis').outerHTML = `
     <div class="kpis" id="kpis">
       ${statTile({ label: 'Daily spend', value: fmtMoneyExact(m.daily_spend), note: "AI grading cost, today's calls" })}
       ${statTile({ label: 'Weekly spend', value: fmtMoneyExact(m.weekly_spend), note: 'AI grading cost, Monday–Sunday' })}
       ${statTile({ label: 'Monthly spend', value: fmtMoneyExact(m.monthly_spend), note: 'AI grading + review costs, this month' })}
-      ${statTile({ label: 'To target', value: target > 0 ? fmtMoney(Math.max(0, target - monthAp)) : '—', note: targetNote })}
+      ${statTile({ label: 'Yearly spend', value: fmtMoneyExact(m.yearly_spend), note: 'AI grading + review costs, this year' })}
     </div>`;
 
   const recent = document.getElementById('recent');
